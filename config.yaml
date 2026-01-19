@@ -1,0 +1,21 @@
+data:
+  bovine_chembl_id:"CHEMBL279"
+  human_chembk_id:"CHEMBL1873"
+  pdb_id:"1TRN"
+
+features:
+  descriptor_types:['2D','fingerprints']
+  morgan_radius:2
+  fingerprint_size:2048
+
+models:
+  test_size:0.2
+  random_state:42
+  cv_folds:5
+  transfer_epochs:50
+
+paths:
+  raw_data:"data/raw/"
+  processed_data:"data/processed/"
+  models:"models/"
+  docking_results:"data/docking_results/"
