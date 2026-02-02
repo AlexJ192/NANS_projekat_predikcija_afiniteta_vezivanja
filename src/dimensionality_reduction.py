@@ -70,7 +70,7 @@ class DimensionalityReducer:
 
         print(f"Sacuvani features: {X_variance.shape[1]}")
         print(f"Uklonjeni features: {X.shape[1] - X_variance.shape[1]}")
-        print(f"Procenat uklonjenih features: {(1-X_variance.shape[1])*100:.1f} %")
+        print(f"Procenat uklonjenih features: {(1-X_variance.shape[1]/X.shape[1])*100:.1f} %")
         return X_variance,kept_feat
     
     def analyze_correlations(self,X,feature_names,plot=True):
@@ -122,7 +122,7 @@ class DimensionalityReducer:
         plt.subplot(2,2,1) #heatmap korelacione matrice
         sample_feat=np.random.choice(feature_names,min(50,len(feature_names)),replace=False) #uzimamo nasumcinih 50 za vizuelizaciju
         sample_corr=corr_matrix.loc[sample_feat,sample_feat]
-        sea.heatmap(sample_corr,cmap='coolwarm',cemter=0,square=True,cbar_kws={"shrink":0.8})
+        sea.heatmap(sample_corr,cmap='coolwarm',center=0,square=True,cbar_kws={"shrink":0.8})
         plt.title(f'Correlation heatmap (50 random features)')
         #distriubucija
         plt.subplot(2,2,2)
@@ -243,7 +243,7 @@ class DimensionalityReducer:
         cumulative_importance=np.cumsum(sorted_f)/np.sum(sorted_f)
 
         axes[1,1].plot(range(1,len(cumulative_importance)+1),cumulative_importance)
-        axes[1,1].axhline(y=0.95,color='green',linestyle='--',label=f'Top {self.k_best} features')
+        axes[1,1].axhline(y=0.95,color='green',linestyle='--',label=f'95% importance')
         axes[1,1].axvline(x=self.k_best,color='red',linestyle='--',label=f'Top {self.k_best} features')
         axes[1,1].set_xlabel('Number of features')
         axes[1,1].set_ylabel('Cumulative f-score')
@@ -251,7 +251,7 @@ class DimensionalityReducer:
         axes[1,1].legend()
         axes[1,1].grid(True,alpha=0.3)
         plt.tight_layout()
-        plt.savefig('../results/feature_importance_analysis.png',dpi=300,bbox_index='tight')
+        plt.savefig('../results/feature_importance_analysis.png',dpi=300,bbox_inches='tight')
         plt.show()
 
     def apply_pca(self,X,feature_names,plot=True):
@@ -267,7 +267,7 @@ class DimensionalityReducer:
 
         #pronalazenje broja komponenti za 95% varijanse
         n_components_95=np.argmax(cumulative_variance>=0.95)+1
-        print(f"Broj komponenti neophodan za varijansu od 95% varijase: {n_components_95} ")
+        print(f"Broj komponenti neophodan za varijansu od 95%: {n_components_95} ")
         if plot:
             self.plot_pca_analysis(explained_variance,cumulative_variance,X_pca,feature_names)
         loadings=self.pca.components_.T * np.sqrt(self.pca.explained_variance_)
@@ -296,7 +296,7 @@ class DimensionalityReducer:
         #cumulative explained variance
         plt.subplot(2,3,2)
         plt.plot(range(1,len(cumulative_variance)+1),cumulative_variance,'ro-')
-        plt.axline(y=0.95,color='green',linestyle='--',label='95% variance')
+        plt.axhline(y=0.95,color='green',linestyle='--',label='95% variance')
         plt.axhline(y=0.90,color='orange',linestyle='--',label='90% variance')
         plt.xlabel('Number of components')
         plt.ylabel('Cumulative explained variance')
@@ -462,8 +462,8 @@ class DimensionalityReducer:
 
 def main():
     reducer=DimensionalityReducer(
-        n_components=100
-        k_best=200
+        n_components=100,
+        k_best=200,
         correlation_threshold=0.95
     )
 
