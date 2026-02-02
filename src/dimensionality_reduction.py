@@ -254,4 +254,99 @@ class DimensionalityReducer:
         plt.savefig('../results/feature_importance_analysis.png',dpi=300,bbox_index='tight')
         plt.show()
 
+    def apply_pca(self,X,feature_names,plot=True):
+        X_scaled=self.scaler.fit_transform(X)
+        X_pca=self.pca.fit_transform(X_scaled)
+        explained_variance=self.pca.explained_variance_ratio_
+        cumulative_variance=np.cumsum(explained_variance)
+
+        print(f"Rezultati PCA analize: ")
+        print(f"Originalna dimenzija: {X.shape}")
+        print(f"Redukovana dimenzija: {X_pca.shape}")
+        print(f"Broj komponenti: {self.n_components}")
+
+        #pronalazenje broja komponenti za 95% varijanse
+        n_components_95=np.argmax(cumulative_variance>=0.95)+1
+        print(f"Broj komponenti neophodan za varijansu od 95% varijase: {n_components_95} ")
+        if plot:
+            self.plot_pca_analysis(explained_variance,cumulative_variance,X_pca,feature_names)
+        loadings=self.pca.components_.T * np.sqrt(self.pca.explained_variance_)
+        print(f"Top contributing features za prva 3 princial components: ")
+        for i in range(3):
+            component_loadings=loadings[:,i]
+            top_indices=np.argsort(np.abs(component_loadings))[-5:][::-1]
+
+            print(f"PC{i+1} (objasnjava {explained_variance[i]*100:.1f}% varijanse):")
+            for index in top_indices:
+                feature_name=feature_names[index] if index<len(feature_names) else f"Feature_{index}"
+                loading_value=component_loadings[index]
+                print(f"{feature_name}: {loading_value:.4f}")
     
+        return X_pca
+    
+    def plot_pca_analysis(self,explained_variance,cumulative_variance,X_pca,feature_names):
+        fig=plt.figure(figsize=(15,10))
+        #scree plot
+        plt.subplot(2,3,1)
+        plt.plot(range(1,len(explained_variance)+1),explained_variance,'bo-')
+        plt.xlabel('Principal component')
+        plt.ylabel('Explained variance ratio')
+        plt.title('Scree plot')
+        plt.grid(True,alpha=0.3)
+        #cumulative explained variance
+        plt.subplot(2,3,2)
+        plt.plot(range(1,len(cumulative_variance)+1),cumulative_variance,'ro-')
+        plt.axline(y=0.95,color='green',linestyle='--',label='95% variance')
+        plt.axhline(y=0.90,color='orange',linestyle='--',label='90% variance')
+        plt.xlabel('Number of components')
+        plt.ylabel('Cumulative explained variance')
+        plt.title('Cumulative explained variance')
+        plt.legend()
+        plt.grid(True,alpha=0.3)
+        #PC1 vs PC2
+        plt.subplot(2,3,3)
+        scatter=plt.scatter(X_pca[:,0],X_pca[:,1],alpha=0.5,s=20)
+        plt.xlabel(f'PC1 ({explained_variance[0]*100:.1f}% variance)')
+        plt.ylabel(f'PC2 ({explained_variance[1]*100:.1f}% variance)')
+        plt.title('PC1 vs PC2')
+        plt.grid(True,alpha=0.3)
+        #biplot
+        plt.subplot(2,3,4)
+        plt.scatter(X_pca[:,0],X_pca[:,1],alpha=0.3,s=10)
+
+        loadings=self.pca.components_.T * np.sqrt(self.pca.explained_variance_)
+        top_features=5 
+        for i in range(top_features):
+            plt.arrow(0,0,loadings[i,0]*3,loadings[i,1]*3,color='r',alpha=0.5,head_width=0.05)
+            feature_name=feature_names[i] if i<len(feature_names) else f"Feature_{i}"
+            plt.text(loadings[i,0]*3.2,loadings[i,1]*3.2,feature_name,color='r',fontsize=8)
+        
+        plt.xlabel('PC1')
+        plt.ylabel('PC2')
+        plt.title('Biplot (PC1 vs PC2 with loadings)')
+        plt.grid(True,alpha=0.3)
+
+        #heatmap loadings za prvih 10PCs
+        plt.subplot(2,3,5)
+        #top 20 features po apsolutnom loadingu
+        loadings_abs=np.abs(loadings[:,:10]).sum(axis=1)
+        top_indices=np.argsort(loadings_abs)[-20:][::-1]
+        top_loadings=loadings[top_indices,:10]
+        top_feature_names=[feature_names[i] for i in top_indices]
+
+        sea.heatmap(top_loadings,cmap='coolwarm',center=0,xticklabels=[f'PC{i+1}' for i in range(10)],yticklabels=top_feature_names)
+        plt.title('Loadings of top 20 features (first 10PCs)')
+
+        plt.subplot(2,3,6)
+        x=range(1,len(cumulative_variance)+1)
+        plt.fill_between(x,0,cumulative_variance,alpha=0.3,label='Cumulative')
+        plt.plot(x,explained_variance,'bo-',label='Individual')
+        plt.xlabel('Number of components')
+        plt.ylabel('Explained variance ratio')
+        plt.title('Variance explained by components')
+        plt.legend()
+        plt.grid(True,alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('../results/pca_analysis.png',dpi=300,bbox_inches='tight')
+        plt.show()
+        
