@@ -60,14 +60,17 @@ class DataPreparation:
         return ki_df
     
     def save_data(self,human_processed,bovine_processed):
-        human_processed.to_csv(f"{self.output_directory}/human_trypsin_processed.csv",index=False)
-        bovine_processed.to_csv(f"{self.output_directory}/bovine_trypsin_processed.csv",index=False)
-
+        human_data_processed=human_processed.copy()
+        bovine_data_processed=bovine_processed.copy()
+        
         #kombinovani skup za transfer learning
-        human_processed['source']='human'
-        bovine_processed['source']='bovine'
-        mix=pd.concat([human_processed,bovine_processed],ignore_index=True)
-        mix.to_csv(f"{self.output_directory}/mix_dataset.csv",index=False)
+        human_data_processed['source']='human'
+        bovine_data_processed['source']='bovine'
+        human_data_processed.to_csv(f"{self.output_directory}/human_trypsin_processed.csv",index=False,sep=';')
+        bovine_data_processed.to_csv(f"{self.output_directory}/bovine_trypsin_processed.csv",index=False,sep=';')
+
+        mix=pd.concat([human_data_processed,bovine_data_processed],ignore_index=True)
+        mix.to_csv(f"{self.output_directory}/mix_dataset.csv",index=False,sep=';')
 
         print("Obradjeni podaci su uspesno sacuvani")
         print(f"Humani: {len(human_processed)}")
