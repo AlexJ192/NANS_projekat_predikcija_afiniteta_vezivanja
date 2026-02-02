@@ -402,7 +402,7 @@ class DimensionalityReducer:
         feature_names_original=X_original.columns.tolist()
         y=metadata['pKi']
 
-        X_variance,kept_variance=self.analyze_variance(X_original.values)
+        X_variance,kept_variance=self.analyze_variance(X_original)
         self.variance_result={
             'X':X_variance,
             'kept_features':kept_variance
