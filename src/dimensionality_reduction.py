@@ -176,3 +176,82 @@ class DimensionalityReducer:
         plt.tight_layout()
         plt.savefig('../results/correlation_analysis.png',dpi=300,bbox_inches='tight')
         plt.show()
+
+    def analyze_feature_importance(self,X,y,feature_names,plot=True):
+        #analiza vaznosti features koristeci statisticke testove
+        #iracunavanje f-rezultata za svaki feature
+        self.selector.fit(X,y)
+        f_scores=self.selector.scores_
+        #izracunavanje mutual information
+        mi_scores=mutual_info_regression(X,y,random_state=42)
+        #kreiranje datafrejma sa rezultatima
+        importance_df=pd.DataFrame({
+            'Feature': feature_names,
+            'F_Score':f_scores,
+            'Mutual_Info':mi_scores
+        })
+        #sortiranje po f-score
+        importance_df=importance_df.sort_values('F_Score',ascending=False)
+
+        print(f"Ukupno feature-a: {len(feature_names)}")
+        print(f"Top 10 najvaznijih feature-a po f-testu: ")
+        print(importance_df.head(10).to_string())
+
+        print("Bottom 10 najmanje vaznih feature-a po f-testu: ")
+        print(importance_df.tail(10).to_string())
+
+        if plot:
+            self.plot_feature_importance(importance_df)
+        
+        #selektovanje k najboljih feture-a
+        X_selected=self.selector.transform(X)
+        selected_features=importance_df.head(self.k_best)['Feature'].tolist()
+
+        print(f"Selektovano {self.k_best} najboljih feature-a")
+        print(f"Minimalna f-test vrednost u selektovanim: {importance_df.iloc[self.k_best-1]['F_Score']:.4f}")
+        print(f"Maksimalna f-test vrednost u neselektovanim: {importance_df.iloc[self.k_best]['F_Score']:.4f}")
+
+        return X_selected,selected_features
+    
+    def plot_feature_importance(self,importance_df):
+        fig,axes=plt.subplots(2,2,figsize=(15,12))
+        #top feats by f-score
+        top_n=20
+        top_features=importance_df.head(top_n)
+        axes[0,0].barh(range(top_n),top_features['F_Score'][::-1])
+        axes[0,0].set_yticks(range(top_n))
+        axes[0,0].set_yticklabels(top_features['Feature'][::-1],fontsize=8)
+        axes[0,0].set_xlabel('F-Score')
+        axes[0,0].set_title(f'Top {top_n} features by f-score')
+        axes[0,0].grid(True,alpha=0.3)
+        #distribucija f-scores
+        axes[0,1].hist(importance_df['F_Score'],bins=50,edgecolor='black',alpha=0.7)
+        axes[0,1].axvline(x=importance_df.iloc[self.k_best-1]['F_Score'],color='purple',linestyle='--',label=f'Cutoff for top {self.k_best}')
+        axes[0,1].set_xlabel('F-Score')
+        axes[0,1].set_ylabel('Number of features')
+        axes[0,1].set_title('Distribution of f-scores')
+        axes[0,1].legend()
+        axes[0,1].grid(True,alpha=0.3)
+        #scatter plot - f-score vs mutual info
+        axes[1,0].scatter(importance_df['F_Score'],importance_df['Mutual_Info'],alpha=0.5,s=10)
+        axes[1,0].set_xlabel('F-Score')
+        axes[1,0].set_ylabel('Mutual Information')
+        axes[1,0].set_title('F-Score vs Mutual Information')
+        axes[1,0].grid(True,alpha=0.3)
+        #cumualitve importance
+        sorted_f=np.sort(importance_df['F_Score'])[::-1]
+        cumulative_importance=np.cumsum(sorted_f)/np.sum(sorted_f)
+
+        axes[1,1].plot(range(1,len(cumulative_importance)+1),cumulative_importance)
+        axes[1,1].axhline(y=0.95,color='green',linestyle='--',label=f'Top {self.k_best} features')
+        axes[1,1].axvline(x=self.k_best,color='red',linestyle='--',label=f'Top {self.k_best} features')
+        axes[1,1].set_xlabel('Number of features')
+        axes[1,1].set_ylabel('Cumulative f-score')
+        axes[1,1].set_title('Cumulative feature importance')
+        axes[1,1].legend()
+        axes[1,1].grid(True,alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('../results/feature_importance_analysis.png',dpi=300,bbox_index='tight')
+        plt.show()
+
+    
