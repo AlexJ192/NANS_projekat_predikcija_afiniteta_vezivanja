@@ -73,3 +73,106 @@ class DimensionalityReducer:
         print(f"Procenat uklonjenih features: {(1-X_variance.shape[1])*100:.1f} %")
         return X_variance,kept_feat
     
+    def analyze_correlations(self,X,feature_names,plot=True):
+        corr_matrix=pd.DataFrame(X,columns=feature_names).corr().abs()
+        print(f"Correlation matrix shape: {corr_matrix.shape()}")
+        #nalazimo visoko korelisane feature parove
+        upper=corr_matrix.where(np.triu(np.ones(corr_matrix.shape),k=1).astype(bool))
+        #analiza korelacija
+        high_corr_pairs=[]
+        for col in upper.columns:
+            high_corr=upper[col][upper[col]>self.correlation_threshold]
+            if len(high_corr)>0:
+                for feature, corr_value in high_corr.items():
+                    high_corr_pairs.append((col,feature,corr_value))
+        
+        print(f"Pronadjeno {len(high_corr_pairs)} parova feature-a sa korelacijom > {self.correlation_threshold}")
+        if high_corr_pairs:
+            #prikaz top 10 najvise korelisanih parova
+            high_corr_pairs.sort(key=lambda x:x[2],reverse=True)
+            print("Top 10 najkorelisanijih parova: ")
+            for i,(f1,f2,corr) in enumerate(high_corr_pairs[:10]):
+                print(f"{i+1}. {f1},{f2} (korelacija: {corr:.4f})")
+
+        #identifikacija features-a za uklanjanje
+        for_removal=set()
+        for f1,f2,_ in high_corr_pairs:
+            #zadrzavamo onaj u paru sa vecom varijansom
+            var_f1=np.var(X[:,list(feature_names).index(f1)])
+            var_f2=np.var(X[:,list(feature_names).index(f2)])
+            for_removal.add(f1 if var_f1<var_f2 else f2)
+        
+        print(f"Broj feature-sa koje treba izbaciti zbog visoke korelacije: {len(for_removal)}")
+
+        if plot and len(high_corr_pairs)>0:
+            self.plot_correlation_analysis(corr_matrix,high_corr_pairs,feature_names)
+        
+        #uklanjanje visoko korelisanih feature-a
+        keep_indices=[i for i,f in enumerate(feature_names) if f not in for_removal]
+        X_corr=X[:,keep_indices]
+        kept_features=[feature_names[i] for i in keep_indices]
+
+        print(f"Sacuvani features: {X_corr.shape[1]}")
+        print(f"Uklonjeni features: {X.shape[1]-X_corr.shape[1]}")
+
+        return X_corr,kept_features
+    
+    def plot_correlation_analysis(self,corr_matrix,high_corr_pairs,feature_names):
+        fig=plt.figure(figsize=(15,10))
+        plt.subplot(2,2,1) #heatmap korelacione matrice
+        sample_feat=np.random.choice(feature_names,min(50,len(feature_names)),replace=False) #uzimamo nasumcinih 50 za vizuelizaciju
+        sample_corr=corr_matrix.loc[sample_feat,sample_feat]
+        sea.heatmap(sample_corr,cmap='colorwarm',cemter=0,square=True,cbar_kws={"shrink":0.8})
+        plt.title(f'Correlation heatmap (50 random features)')
+        #distriubucija
+        plt.subplot(2,2,2)
+        #uzimamo gornji trougao bez  dijagonale
+        corr_values=corr_matrix.values[np.triu_indices_from(corr_matrix.values,k=1)]
+        plt.hist(corr_values,bins=50,edgecolor='purple',alpha=0.7)
+        plt.axvline(x=self.correlation_threshold,color='red',linestyle='--',label=f'Threshold={self.correlation_threshold}')
+        plt.xlabel('Absolute correlation')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of feature correlations')
+        plt.legend()
+        plt.grid(True,alpha=0.3)
+        #dendrogram za klastersku analizu
+        plt.subplot(2,2,3)
+        #uzimamo nasumicnih 30 features za dendrogram
+        if len(feature_names)>30:
+            sample_indices=np.random.choice(len(feature_names),30,replace=False)
+            sample_feat=[feature_names[i] for i in sample_indices]
+            sample_corr=corr_matrix.loc[sample_feat,sample_feat]
+        else:
+            sample_corr=corr_matrix
+        
+        #konvertovanje korelacione matrice u distancu
+        distance_matrix=1-np.abs(sample_corr)
+        condensed_dist=squareform(distance_matrix)
+        linkage_matrix=hierarchy.linkage(condensed_dist,method='average')
+        hierarchy.dendrogram(linkage_matrix,labels=sample_corr.columns,leaf_rotation=90,leaf_font_size=8)
+        plt.title('Feature clustering dendrogram')
+        plt.xlabel('Features')
+        plt.ylabel('Distance (1 - |correlation|)')
+
+        #scatterplot najvise korelisanog para
+        plt.subplot(2,2,4)
+        if high_corr_pairs:
+            #uzimamo najvise kroelisan par
+            top_pair=high_corr_pairs[0]
+            f1_index=list(feature_names).index(top_pair[0])
+            f2_index=list(feature_names).index(top_pair[1])
+            #ucitavanje originalnih podataka
+            original_X=self.original_df.drop(columns=['Smiles','pKi','source'],errors='ignore')
+            plt.scatter(original_X.iloc[:,f1_index],original_X.iloc[:,f2_index],alpha=0.5,s=20)
+            plt.xlabel(top_pair[0])
+            plt.ylabel(top_pair[1])
+            plt.title(f'Most correlated pairL r={top_pair[2]:.4f}')
+            #dodavanje regression line
+            z=np.polyfit(original_X.iloc[:,f1_index],original_X.iloc[:,f2_index],1)
+            p=np.poly1d(z)
+            x_range=np.linspace(original_X.iloc[:,f1_index].min(),original_X.iloc[:,f1_index].max(),100)
+            plt.plot(x_range,p(x_range),"r--",alpha=0.8)
+            plt.grid(True,alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('../results/correlation_analysis.png',dpi=300,bbox_inches='tight')
+        plt.show()
