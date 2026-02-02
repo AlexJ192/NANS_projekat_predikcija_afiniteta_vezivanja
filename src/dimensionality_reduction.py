@@ -22,7 +22,7 @@ class DimensionalityReducer:
         self.variance_threshold=VarianceThreshold(threshold=0.01)
         self.scaler=StandardScaler()
         self.results_history={}
-    def lead_data(self,features_path):
+    def load_data(self,features_path):
         df=pd.read_csv(features_path)
         self.original_df=df.copy() #cuvanje originalnih podataka
         self.metadata=df[['Smiles','pKi','source']].copy() #odavajanje features of metadata
@@ -43,7 +43,7 @@ class DimensionalityReducer:
             #histogram
             plt.subplot(1,2,1)
             plt.hist(variances,bins=50,edgecolor='black',alpha=0.7)
-            plt.axvline(x=0.01,coler='red',linestyle='--',label='Threshold=0.01')
+            plt.axvline(x=0.01,color='red',linestyle='--',label='Threshold=0.01')
             plt.xlabel('Variance')
             plt.ylabel('Number of features')
             plt.title('Distribution of feature variances')
@@ -75,7 +75,7 @@ class DimensionalityReducer:
     
     def analyze_correlations(self,X,feature_names,plot=True):
         corr_matrix=pd.DataFrame(X,columns=feature_names).corr().abs()
-        print(f"Correlation matrix shape: {corr_matrix.shape()}")
+        print(f"Correlation matrix shape: {corr_matrix.shape}")
         #nalazimo visoko korelisane feature parove
         upper=corr_matrix.where(np.triu(np.ones(corr_matrix.shape),k=1).astype(bool))
         #analiza korelacija
@@ -122,7 +122,7 @@ class DimensionalityReducer:
         plt.subplot(2,2,1) #heatmap korelacione matrice
         sample_feat=np.random.choice(feature_names,min(50,len(feature_names)),replace=False) #uzimamo nasumcinih 50 za vizuelizaciju
         sample_corr=corr_matrix.loc[sample_feat,sample_feat]
-        sea.heatmap(sample_corr,cmap='colorwarm',cemter=0,square=True,cbar_kws={"shrink":0.8})
+        sea.heatmap(sample_corr,cmap='coolwarm',cemter=0,square=True,cbar_kws={"shrink":0.8})
         plt.title(f'Correlation heatmap (50 random features)')
         #distriubucija
         plt.subplot(2,2,2)
@@ -349,4 +349,126 @@ class DimensionalityReducer:
         plt.tight_layout()
         plt.savefig('../results/pca_analysis.png',dpi=300,bbox_inches='tight')
         plt.show()
+
+    def generate_summary(self):
+        original_features=2265
+        print(f"  Total features: {original_features}")
+        print(f"  Total samples: {len(self.metadata)}")
+        print(f"  - Human: {sum(self.metadata['source'] == 'human')}")
+        print(f"  - Bovine: {sum(self.metadata['source'] == 'bovine')}")
         
+        print(f"\nREDUCTION STEPS:")
+        
+        # Proveri da li smo uradili sve korake
+        steps_completed = []
+        if hasattr(self, 'variance_result'):
+            steps_completed.append('Variance Threshold')
+            kept_variance = self.variance_result['kept_features']
+            print(f"  1. Variance Threshold:")
+            print(f"     - Removed features with variance < 0.01")
+            print(f"     - Kept features: {len(kept_variance)}")
+            print(f"     - Reduction: {((original_features - len(kept_variance))/original_features)*100:.1f}%")
+        
+        if hasattr(self, 'correlation_result'):
+            steps_completed.append('Correlation Removal')
+            kept_corr = self.correlation_result['kept_features']
+            print(f"  2. Correlation Removal (threshold: {self.correlation_threshold}):")
+            print(f"     - Removed highly correlated features")
+            print(f"     - Kept features: {len(kept_corr)}")
+            print(f"     - Reduction from previous step: {((len(kept_variance) - len(kept_corr))/len(kept_variance))*100:.1f}%")
+        
+        if hasattr(self, 'importance_result'):
+            steps_completed.append('Feature Selection')
+            kept_importance = self.importance_result['kept_features']
+            print(f"  3. Feature Selection (SelectKBest, k={self.k_best}):")
+            print(f"     - Selected top {self.k_best} features by F-score")
+            print(f"     - Kept features: {len(kept_importance)}")
+            print(f"     - Reduction from previous step: {((len(kept_corr) - len(kept_importance))/len(kept_corr))*100:.1f}%")
+        
+        if hasattr(self, 'pca_result'):
+            steps_completed.append('PCA')
+            print(f"  4. Principal Component Analysis:")
+            print(f"     - Number of components: {self.n_components}")
+            print(f"     - Explained variance: {np.sum(self.pca.explained_variance_ratio_):.3f}")
+            print(f"     - Final dimensions: {self.n_components}")
+            print(f"     - Overall reduction: {((original_features - self.n_components)/original_features)*100:.1f}%")
+        
+    def run_analysis(self,features_path):
+        os.makedirs("../results",exist_ok=True)
+        os.makedirs("../data/reduced",exist_ok=True)
+        os.makedirs("../models",exist_ok=True)
+
+        X_original,metadata=self.load_data(features_path)
+        feature_names_original=X_original.columns.tolist()
+        y=metadata['pKi']
+
+        X_variance,kept_variance=self.analyze_variance(X_original.values)
+        self.variance_result={
+            'X':X_variance,
+            'kept_features':kept_variance
+        }
+
+        X_corr,kept_corr=self.analyze_correlations(X_variance,kept_variance)
+        self.correlation_result={
+            'X':X_corr,
+            'kept_features':kept_corr
+        }
+
+        X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr)
+        self.importance_result={
+            'X':X_importance,
+            'kept_features':kept_importance
+        }
+
+        X_pca=self.apply_pca(X_importance,kept_importance)
+        self.pca_result={
+            'X':X_pca
+        }
+
+        self.save_reduced_datasets(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
+        self.generate_summary()
+        self.save_models()
+
+        return {
+            'variance':self.variance_result,
+            'correlation':self.correlation_result,
+            'importance':self.importance_result,
+            'pca':self.pca_result
+        }
+    
+    def save_reduced_datasets(self,X_variance,X_corr,X_importance,X_pca,features_variance,features_corr,features_importance,metadata):
+        df_variance=pd.DataFrame(X_variance,columns=features_variance)
+        df_variance=pd.concat([df_variance,metadata.reset_index(drop=True)],axis=1)
+        df_variance.to_csv('../data/reduced/variance_reduced.csv',index=False,sep=';')
+
+        df_corr=pd.DataFrame(X_corr,columns=features_corr)
+        df_corr=pd.concat([df_corr,metadata.reset_index(drop=True)],axis=1)
+        df_corr.to_csv('../data/reduced/correlation_reduced.csv',index=False,sep=';')
+
+        df_importance=pd.DataFrame(X_importance,columns=features_importance)
+        df_importance=pd.concat([df_importance,metadata.reset_index(drop=True)],axis=1)
+        df_importance.to_csv('../data/reduced/feature_selected.csv',index=False,sep=';')
+
+        pca_columns=[f'PC{i+1}' for i in range(X_pca.shape[1])]
+        df_pca=pd.DataFrame(X_pca,columns=pca_columns)
+        df_pca=pd.concat([df_pca,metadata.reset_index(drop=True)],axis=1)
+        df_pca.to_csv('../data/reduced/pca_reduced.csv',index=False)
+    
+    def save_models(self):
+        joblib.dump(self.variance_threshold,'../models/variance_threshold.pkl')
+        joblib.dump(self.selector,'../models/feature_selector.pkl')
+        joblib.dump(self.pca,'../models/pca_transformer.pkl')
+        joblib.dump(self.scaler,'../models/standard_scaler.pkl')
+
+def main():
+    reducer=DimensionalityReducer(
+        n_components=100
+        k_best=200
+        correlation_threshold=0.95
+    )
+
+    results=reducer.run_analysis(features_path="../data/features/human_trypsin_features.csv")
+    return results
+
+if __name__=="__main__":
+    results=main()
