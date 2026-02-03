@@ -30,7 +30,52 @@ class DimensionalityReducer:
         return X,self.metadata
     
     def analyze_variance(self,X,plot=True):
-        variances=np.var(X,axis=0) #racuna varijansu za svaki feature
+        if isinstance(X,pd.DataFrame):
+            X_values=X.values
+            feature_names=X.columns.tolist()
+            original_shape=X.shape
+        else:
+            X_values=X
+            feature_names=None
+            original_shape=X.shape
+        print(f"\n=== DEBUG INFO ===")
+        print(f"X_values shape: {X_values.shape}")
+        print(f"X_values dtype: {X_values.dtype}")
+
+        # Proveri nekoliko originalnih vrednosti
+        print(f"\nOriginal values sample (first 3 rows, first 5 columns):")
+        print(X_values[:3, :5])
+
+        #standardizacija
+        scaler=StandardScaler()
+        X_scaled=scaler.fit_transform(X_values)
+
+        print(f"\nScaled values sample (first 3 rows, first 5 columns):")
+        print(X_scaled[:3, :5])
+
+        variances=np.var(X_scaled,axis=0) #racuna varijansu za svaki feature
+
+
+        
+        print(f"\nVariances sample (first 10):")
+        for i in range(min(10, len(variances))):
+            print(f"  Feature {i}: {variances[i]:.10f}")
+        
+        print(f"\nUnique variance values: {np.unique(np.round(variances, 10))}")
+        print(f"Number of unique variance values: {len(np.unique(np.round(variances, 10)))}")
+        
+        # OVO JE KLJUČNO: da li su sve varijanse 0 ili 1?
+        zero_var = np.sum(np.abs(variances) < 1e-10)
+        one_var = np.sum(np.abs(variances - 1.0) < 1e-5)
+        other_var = len(variances) - zero_var - one_var
+        
+        print(f"\nVariance distribution:")
+        print(f"  Exactly 0 variance: {zero_var}")
+        print(f"  ~1 variance (±1e-5): {one_var}")
+        print(f"  Other values: {other_var}")
+
+
+
         variance_stats=pd.Series(variances).describe()
         print(f"Minimalna varijansa: {variance_stats['min']:.6f}")
         print(f"Maksimalna varijansa: {variance_stats['max']:.6f}")
@@ -42,7 +87,7 @@ class DimensionalityReducer:
             plt.figure(figsize=(12,5))
             #histogram
             plt.subplot(1,2,1)
-            plt.hist(variances,bins=50,edgecolor='black',alpha=0.7)
+            plt.hist(variances,bins=150,edgecolor='black',alpha=0.7)
             plt.axvline(x=0.01,color='red',linestyle='--',label='Threshold=0.01')
             plt.xlabel('Variance')
             plt.ylabel('Number of features')
@@ -59,19 +104,23 @@ class DimensionalityReducer:
             plt.legend()
             plt.grid(True,alpha=0.3)
             plt.tight_layout()
-            plt.savefig('../results/variance_analysis.png',dpi=300,bbox_inches='tight')
+            plt.savefig('../results/variance_analysis_scaled.png',dpi=300,bbox_inches='tight')
             plt.show()
         
         #priprema threshold
-        self.variance_threshold.fit(X)
-        X_variance=self.variance_threshold.transform(X)
+        self.variance_threshold.fit(X_scaled)
+        X_variance=self.variance_threshold.transform(X_scaled)
         kept_feat_mask=self.variance_threshold.get_support()
-        kept_feat=X.columns[kept_feat_mask]
-
+        if feature_names is not None:
+            kept_feat=[feature_names[i] for i in range(len(feature_names)) if kept_feat_mask[i]]
+        else:
+            kept_feat=[f"Feature_{i}" for i in range(len(kept_feat_mask)) if kept_feat_mask[i]]
+        
+        X_original_filtered=X_values[:,kept_feat_mask]
         print(f"Sacuvani features: {X_variance.shape[1]}")
-        print(f"Uklonjeni features: {X.shape[1] - X_variance.shape[1]}")
-        print(f"Procenat uklonjenih features: {(1-X_variance.shape[1]/X.shape[1])*100:.1f} %")
-        return X_variance,kept_feat
+        print(f"Uklonjeni features: {original_shape[1] - X_variance.shape[1]}")
+        print(f"Procenat uklonjenih features: {(1-X_variance.shape[1]/original_shape[1])*100:.1f} %")
+        return X_original_filtered,kept_feat
     
     def analyze_correlations(self,X,feature_names,plot=True):
         corr_matrix=pd.DataFrame(X,columns=feature_names).corr().abs()
