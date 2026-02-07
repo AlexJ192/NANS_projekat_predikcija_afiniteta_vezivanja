@@ -22,6 +22,10 @@ class DimensionalityReducer:
         self.variance_threshold=VarianceThreshold(threshold=0.01)
         self.scaler=StandardScaler()
         self.results_history={}
+        self.correlation_mask=None #cuva features koje zadrzavam nakon corr reduct
+        self.selected_feature_names=None #top k features
+        self.feature_mask=None #koje kolone su izabrane
+
     def load_data(self,features_path):
         df=pd.read_csv(features_path)
         self.original_df=df.copy() #cuvanje originalnih podataka
@@ -29,7 +33,7 @@ class DimensionalityReducer:
         X=df.drop(columns=['Smiles','pKi','source'],errors='ignore')
         return X,self.metadata
     
-    def analyze_variance(self,X,plot=True):
+    def analyze_variance(self,X,plot=True,plot_prefix=""):
         if isinstance(X,pd.DataFrame):
             X_values=X.values
             feature_names=X.columns.tolist()
@@ -104,7 +108,7 @@ class DimensionalityReducer:
             plt.legend()
             plt.grid(True,alpha=0.3)
             plt.tight_layout()
-            plt.savefig('../results/variance_analysis_scaled.png',dpi=300,bbox_inches='tight')
+            plt.savefig(f'../results/{plot_prefix}_variance_analysis_scaled.png',dpi=300,bbox_inches='tight')
             plt.show()
         
         #priprema threshold
@@ -122,7 +126,7 @@ class DimensionalityReducer:
         print(f"Procenat uklonjenih features: {(1-X_variance.shape[1]/original_shape[1])*100:.1f} %")
         return X_original_filtered,kept_feat
     
-    def analyze_correlations(self,X,feature_names,plot=True):
+    def analyze_correlations(self,X,feature_names,plot=True,plot_prefix=""):
         corr_matrix=pd.DataFrame(X,columns=feature_names).corr().abs()
         print(f"Correlation matrix shape: {corr_matrix.shape}")
         #nalazimo visoko korelisane feature parove
@@ -154,10 +158,11 @@ class DimensionalityReducer:
         print(f"Broj feature-sa koje treba izbaciti zbog visoke korelacije: {len(for_removal)}")
 
         if plot and len(high_corr_pairs)>0:
-            self.plot_correlation_analysis(corr_matrix,high_corr_pairs,feature_names)
+            self.plot_correlation_analysis(corr_matrix,high_corr_pairs,feature_names,plot_prefix)
         
         #uklanjanje visoko korelisanih feature-a
         keep_indices=[i for i,f in enumerate(feature_names) if f not in for_removal]
+        self.correlation_mask=keep_indices #cuvam masku za kasniju upotrebu
         X_corr=X[:,keep_indices]
         kept_features=[feature_names[i] for i in keep_indices]
 
@@ -166,7 +171,7 @@ class DimensionalityReducer:
 
         return X_corr,kept_features
     
-    def plot_correlation_analysis(self,corr_matrix,high_corr_pairs,feature_names):
+    def plot_correlation_analysis(self,corr_matrix,high_corr_pairs,feature_names,plot_prefix=""):
         fig=plt.figure(figsize=(15,10))
         plt.subplot(2,2,1) #heatmap korelacione matrice
         sample_feat=np.random.choice(feature_names,min(50,len(feature_names)),replace=False) #uzimamo nasumcinih 50 za vizuelizaciju
@@ -223,10 +228,10 @@ class DimensionalityReducer:
             plt.plot(x_range,p(x_range),"r--",alpha=0.8)
             plt.grid(True,alpha=0.3)
         plt.tight_layout()
-        plt.savefig('../results/correlation_analysis.png',dpi=300,bbox_inches='tight')
+        plt.savefig(f'../results/{plot_prefix}_correlation_analysis.png',dpi=300,bbox_inches='tight')
         plt.show()
 
-    def analyze_feature_importance(self,X,y,feature_names,plot=True):
+    def analyze_feature_importance(self,X,y,feature_names,plot=True,plot_prefix=""):
         #analiza vaznosti features koristeci statisticke testove
         #iracunavanje f-rezultata za svaki feature
         self.selector.fit(X,y)
@@ -250,7 +255,7 @@ class DimensionalityReducer:
         print(importance_df.tail(10).to_string())
 
         if plot:
-            self.plot_feature_importance(importance_df)
+            self.plot_feature_importance(importance_df,plot_prefix)
         
         #selektovanje k najboljih feture-a
         X_selected=self.selector.transform(X)
@@ -262,7 +267,7 @@ class DimensionalityReducer:
 
         return X_selected,selected_features
     
-    def plot_feature_importance(self,importance_df):
+    def plot_feature_importance(self,importance_df,plot_prefix=""):
         fig,axes=plt.subplots(2,2,figsize=(15,12))
         #top feats by f-score
         top_n=20
@@ -300,10 +305,10 @@ class DimensionalityReducer:
         axes[1,1].legend()
         axes[1,1].grid(True,alpha=0.3)
         plt.tight_layout()
-        plt.savefig('../results/feature_importance_analysis.png',dpi=300,bbox_inches='tight')
+        plt.savefig(f'../results/{plot_prefix}_feature_importance_analysis.png',dpi=300,bbox_inches='tight')
         plt.show()
 
-    def apply_pca(self,X,feature_names,plot=True):
+    def apply_pca(self,X,feature_names,plot=True,plot_prefix=""):
         X_scaled=self.scaler.fit_transform(X)
         X_pca=self.pca.fit_transform(X_scaled)
         explained_variance=self.pca.explained_variance_ratio_
@@ -318,7 +323,7 @@ class DimensionalityReducer:
         n_components_95=np.argmax(cumulative_variance>=0.95)+1
         print(f"Broj komponenti neophodan za varijansu od 95%: {n_components_95} ")
         if plot:
-            self.plot_pca_analysis(explained_variance,cumulative_variance,X_pca,feature_names)
+            self.plot_pca_analysis(explained_variance,cumulative_variance,X_pca,feature_names,plot_prefix)
         loadings=self.pca.components_.T * np.sqrt(self.pca.explained_variance_)
         print(f"Top contributing features za prva 3 princial components: ")
         for i in range(3):
@@ -333,7 +338,7 @@ class DimensionalityReducer:
     
         return X_pca
     
-    def plot_pca_analysis(self,explained_variance,cumulative_variance,X_pca,feature_names):
+    def plot_pca_analysis(self,explained_variance,cumulative_variance,X_pca,feature_names,plot_prefix=""):
         fig=plt.figure(figsize=(15,10))
         #scree plot
         plt.subplot(2,3,1)
@@ -396,7 +401,7 @@ class DimensionalityReducer:
         plt.legend()
         plt.grid(True,alpha=0.3)
         plt.tight_layout()
-        plt.savefig('../results/pca_analysis.png',dpi=300,bbox_inches='tight')
+        plt.savefig(f'../results/{plot_prefix}_pca_analysis.png',dpi=300,bbox_inches='tight')
         plt.show()
 
     def generate_summary(self):
@@ -442,7 +447,7 @@ class DimensionalityReducer:
             print(f"     - Final dimensions: {self.n_components}")
             print(f"     - Overall reduction: {((original_features - self.n_components)/original_features)*100:.1f}%")
         
-    def run_analysis(self,features_path):
+    def run_analysis(self,features_path,plot_prefix="human",use_saved_features=False,saved_features_path=None):
         os.makedirs("../results",exist_ok=True)
         os.makedirs("../data/reduced",exist_ok=True)
         os.makedirs("../models",exist_ok=True)
@@ -451,33 +456,36 @@ class DimensionalityReducer:
         feature_names_original=X_original.columns.tolist()
         y=metadata['pKi']
 
-        X_variance,kept_variance=self.analyze_variance(X_original)
+        X_variance,kept_variance=self.analyze_variance(X_original,plot_prefix=plot_prefix)
         self.variance_result={
             'X':X_variance,
             'kept_features':kept_variance
         }
 
-        X_corr,kept_corr=self.analyze_correlations(X_variance,kept_variance)
+        X_corr,kept_corr=self.analyze_correlations(X_variance,kept_variance,plot_prefix=plot_prefix)
         self.correlation_result={
             'X':X_corr,
             'kept_features':kept_corr
         }
 
-        X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr)
+        X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr,plot_prefix=plot_prefix)
         self.importance_result={
             'X':X_importance,
             'kept_features':kept_importance
         }
 
-        X_pca=self.apply_pca(X_importance,kept_importance)
+        X_pca=self.apply_pca(X_importance,kept_importance,plot_prefix=plot_prefix)
         self.pca_result={
             'X':X_pca
         }
+        if plot_prefix=="human":
+            self.save_reduced_datasets(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
+            self.save_models()
+        else:
+            self.save_reduced_datasets_bovine(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
+            self.save_models_bovine
 
-        self.save_reduced_datasets(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
         self.generate_summary()
-        self.save_models()
-
         return {
             'variance':self.variance_result,
             'correlation':self.correlation_result,
@@ -485,6 +493,26 @@ class DimensionalityReducer:
             'pca':self.pca_result
         }
     
+    def run_analysis_bovine(self,features_path,plot_prefix="bovine"):
+       return self.run_analysis(features_path,plot_prefix)
+    def save_reduced_datasets_bovine(self,X_variance,X_corr,X_importance,X_pca,features_variance,features_corr,features_importance,metadata):
+        df_variance=pd.DataFrame(X_variance,columns=features_variance)
+        df_variance=pd.concat([df_variance,metadata.reset_index(drop=True)],axis=1)
+        df_variance.to_csv('../data/reduced/bovine_variance_reduced.csv',index=False,sep=';')
+
+        df_corr=pd.DataFrame(X_corr,columns=features_corr)
+        df_corr=pd.concat([df_corr,metadata.reset_index(drop=True)],axis=1)
+        df_corr.to_csv('../data/reduced/bovine_correlation_reduced.csv',index=False,sep=';')
+
+        df_importance=pd.DataFrame(X_importance,columns=features_importance)
+        df_importance=pd.concat([df_importance,metadata.reset_index(drop=True)],axis=1)
+        df_importance.to_csv('../data/reduced/bovine_feature_selected.csv',index=False,sep=';')
+
+        pca_columns=[f'PC{i+1}' for i in range(X_pca.shape[1])]
+        df_pca=pd.DataFrame(X_pca,columns=pca_columns)
+        df_pca=pd.concat([df_pca,metadata.reset_index(drop=True)],axis=1)
+        df_pca.to_csv('../data/reduced/bovine_pca_reduced.csv',index=False,sep=';')
+
     def save_reduced_datasets(self,X_variance,X_corr,X_importance,X_pca,features_variance,features_corr,features_importance,metadata):
         df_variance=pd.DataFrame(X_variance,columns=features_variance)
         df_variance=pd.concat([df_variance,metadata.reset_index(drop=True)],axis=1)
@@ -501,23 +529,43 @@ class DimensionalityReducer:
         pca_columns=[f'PC{i+1}' for i in range(X_pca.shape[1])]
         df_pca=pd.DataFrame(X_pca,columns=pca_columns)
         df_pca=pd.concat([df_pca,metadata.reset_index(drop=True)],axis=1)
-        df_pca.to_csv('../data/reduced/pca_reduced.csv',index=False)
+        df_pca.to_csv('../data/reduced/pca_reduced.csv',index=False,sep=',')
     
+    def save_models_bovine(self):
+        joblib.dump(self.variance_threshold,'../models/bovine_variance_threshold.pkl')
+        joblib.dump(self.selector,'../models/bovine_feature_selector.pkl')
+        joblib.dump(self.pca,'../models/bovine_pca_transformer.pkl')
+        joblib.dump(self.scaler,'../models/bovine_standard_scaler.pkl')
+        if self.correlation_mask is not None:
+            joblib.dump(self.correlation_mask,'../models/bovine_correlation_mask.pkl')
+        else:
+            print('Bovine corr mask nije pronadjen, te nije ni sacuvan')
     def save_models(self):
         joblib.dump(self.variance_threshold,'../models/variance_threshold.pkl')
         joblib.dump(self.selector,'../models/feature_selector.pkl')
         joblib.dump(self.pca,'../models/pca_transformer.pkl')
         joblib.dump(self.scaler,'../models/standard_scaler.pkl')
+        if self.correlation_mask is not None:
+            joblib.dump(self.correlation_mask,'../models/correlation_mask.pkl')
+        else:
+            print('Corr mask nije pronadjen, te nije ni sacuvan')
 
 def main():
-    reducer=DimensionalityReducer(
+    reducer_human=DimensionalityReducer(
         n_components=100,
         k_best=200,
         correlation_threshold=0.95
     )
-
-    results=reducer.run_analysis(features_path="../data/features/human_trypsin_features.csv")
-    return results
+    results_human=reducer_human.run_analysis(features_path="../data/features/human_trypsin_features.csv",plot_prefix="human")
+    
+    reducer_bovine=DimensionalityReducer(
+        n_components=100,
+        k_best=200,
+        correlation_threshold=0.95
+    )
+    
+    results_bovine=reducer_bovine.run_analysis_bovine(features_path="../data/features/bovine_trypsin_features.csv",plot_prefix="bovine")
+    return results_human,results_bovine
 
 if __name__=="__main__":
-    results=main()
+    results_h,results_b=main()
