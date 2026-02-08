@@ -547,165 +547,237 @@ class DimensionalityReducer:
         plt.savefig(f'../results/{plot_prefix}_pca_overview.png',dpi=300,bbox_inches='tight')
         plt.close()
         
-
-    def run_analysis(self,features_path,plot_prefix="human",use_saved_features=False,saved_features_path=None):
-        os.makedirs("../results",exist_ok=True)
-        os.makedirs("../data/reduced",exist_ok=True)
-        os.makedirs("../models",exist_ok=True)
-
-        X_original,metadata=self.load_data(features_path)
-        feature_names_original=X_original.columns.tolist()
-        y=metadata['pKi']
-
-        X_variance,kept_variance=self.analyze_variance(X_original,plot_prefix=plot_prefix)
-        
-        X_corr,kept_corr=self.analyze_correlations(X_variance,kept_variance,plot_prefix=plot_prefix)
-
-        if use_saved_features and saved_features_path:
-            X_importance,kept_importance=self.apply_saved_feat_selection(X_corr,y,kept_corr,saved_features_path)
-        else:
-            X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr,plot_prefix=plot_prefix)
-            self.save_selected_features(kept_importance,plot_prefix)
-
-        X_pca=self.apply_pca(X_importance,kept_importance,plot_prefix=plot_prefix)
-        self.pca_result={
-            'X':X_pca
-        }
-        if plot_prefix=="human":
-            self.save_reduced_datasets(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
-            self.save_models()
-        else:
-            self.save_reduced_datasets_bovine(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
-            self.save_models_bovine()
-
+    def fit(self,X,y,feature_names,plot_prefix='human'):
+        self.original_feature_names=feature_names.copy() #cuvamo originalne feature names zaaligment
+        if isinstance(X,pd.DataFrame):
+            X=X.values
+        X_variance,kept_variance=self.analyze_variance(pd.DataFrame(X,columns=feature_names),plot=True,plot_prefix=plot_prefix)
+        X_corr,kept_corr=self.analyze_correlations(X_variance,kept_variance,plot=True,plot_prefix=plot_prefix)
+        X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr,plot=True,plot_prefix=plot_prefix)
+        self.save_selected_features(kept_importance,plot_prefix)
+        X_pca=self.apply_pca(X_importance,kept_importance,plot=True,plot_prefix=plot_prefix)
         self.generate_summary()
-        return {
-            'variance':{'X':X_variance,'kept_features':kept_variance},
-            'correlation':{'X':X_corr,'kept_features':kept_corr},
-            'importance':{'X':X_importance,'kept_features':kept_importance},
-            'pca':{'X':X_pca}
+        self.is_fitted=True
+        return X_pca
+    
+    def transform(self,X,feature_names,plot_prefix="bovine"):
+        if not self.is_fitted:
+           raise ValueError("Neophodno je prvo redukovati humani tripsin")
+        if isinstance(X,pd.DataFrame):
+           X=X.values
+        X_aligned,alignment_info=self._align_features(X,feature_names,self.original_feature_names)
+        print(f"Original features: {len(feature_names)}")
+        print(f"Expected features: {len(self.original_feature_names)}")
+        print(f"Matched: {alignment_info['n_matched']} ({alignment_info['match_percentage']:.2f}%)")
+        print(f"Missing: {alignment_info['n_missing']}")
+        print(f"Extra (ignored): {alignment_info['n_extra']}")
+
+        if alignment_info['n_missing']>0:
+            print(f"Missing features: ")
+            for feat in alignment_info['missing_examples']:
+                print(f"{feat}")
+        
+        if alignment_info['match_percentage']<95:
+            print(f"Samo {alignment_info['match_percentage']:.1f}% features se poklapa. model moze imati smanjenu preciznost")
+        else:
+            print(f"Aligment je okej ({alignment_info['match_percentage']:.1f}% poklapanja)")
+        X=X_aligned
+        X_variance=X[:,self.variance_mask]
+        print(f"Zadrzano {X_variance.shape[1]} features")
+        X_corr=X_variance[:,self.correlation_mask]
+        print(f"Zadrzano {X_corr.shape[1]} features")
+        X_selected=self.selector.transform(X_corr)
+        print(f"Zadrzano {X_selected.shape[1]}")
+        X_scaled=self.scaler.transform(X_selected)
+        print(f"Zadrzano {X_scaled.shape[1]} features")
+        X_pca=self.pca.transform(X_scaled)
+        print(f"Zadrzano {X_pca.shape[1]} features")
+        self._plot_bovine_pca(X_pca,plot_prefix)
+        return X_pca
+    
+    def save(self,path="../models/saved_data"):
+        os.makedirs(path,exist_ok=True)
+        data={
+            'variance_threshold':self.variance_threshold,
+            'variance_mask':self.variance_mask,
+            'scaler':self.scaler,
+            'selector':self.selector,
+            'pca':self.pca,
+            'correlation_mask':self.correlation_mask,
+            'original_features_names':self.original_feature_names,
+            'selected_feature_names':self.selected_feature_names,
+            'is_fitted':self.is_fitted,
+            'config':{
+                'n_components':self.n_components,
+                'k_best':self.k_best,
+                'correlation_threshold':self.correlation_threshold
+            }
         }
+        joblib.dump(data,f"{path}/data.pkl")
+
+    @classmethod
+    def load_existing(cls,path="../models/saved_data"):
+        data=joblib.load(f"{path}/data.pkl")
+        config=data['config']
+        data_processing_elements=cls(n_components=config['n_components'],k_best=config['k_best'],correlation_threshold=config['correlation_threshold'])
+        data_processing_elements.variance_threshold=data['variance_threshold']
+        data_processing_elements.variance_mask=data['variance_mask']
+        data_processing_elements.scaler=data['scaler']
+        data_processing_elements.selector=data['selector']
+        data_processing_elements.pca=data['pca']
+        data_processing_elements.correlation_mask=data['correlation_mask']
+        data_processing_elements.original_feature_names=data.get('original_features_names',None)
+        data_processing_elements.selected_feature_names=data.get('selected_features_names',None)
+        data_processing_elements.is_fitted=data.get('is_fitted',False)
+        return data_processing_elements
     
-    def run_analysis_bovine(self,features_path,human_features_path):
-       return self.run_analysis(features_path=features_path,plot_prefix="bovine",use_saved_features=True,saved_features_path=human_features_path)
-    
-    def save_reduced_datasets_bovine(self,X_variance,X_corr,X_importance,X_pca,features_variance,features_corr,features_importance,metadata):
-        df_variance=pd.DataFrame(X_variance,columns=features_variance)
-        df_variance=pd.concat([df_variance,metadata.reset_index(drop=True)],axis=1)
-        df_variance.to_csv('../data/reduced/bovine_variance_reduced.csv',index=False,sep=';')
-
-        df_corr=pd.DataFrame(X_corr,columns=features_corr)
-        df_corr=pd.concat([df_corr,metadata.reset_index(drop=True)],axis=1)
-        df_corr.to_csv('../data/reduced/bovine_correlation_reduced.csv',index=False,sep=';')
-
-        df_importance=pd.DataFrame(X_importance,columns=features_importance)
-        df_importance=pd.concat([df_importance,metadata.reset_index(drop=True)],axis=1)
-        df_importance.to_csv('../data/reduced/bovine_feature_selected.csv',index=False,sep=';')
-
-        pca_columns=[f'PC{i+1}' for i in range(X_pca.shape[1])]
-        df_pca=pd.DataFrame(X_pca,columns=pca_columns)
-        df_pca=pd.concat([df_pca,metadata.reset_index(drop=True)],axis=1)
-        df_pca.to_csv('../data/reduced/bovine_pca_reduced.csv',index=False,sep=';')
-
-    def save_reduced_datasets(self,X_variance,X_corr,X_importance,X_pca,features_variance,features_corr,features_importance,metadata):
-        df_variance=pd.DataFrame(X_variance,columns=features_variance)
-        df_variance=pd.concat([df_variance,metadata.reset_index(drop=True)],axis=1)
-        df_variance.to_csv('../data/reduced/variance_reduced.csv',index=False,sep=';')
-
-        df_corr=pd.DataFrame(X_corr,columns=features_corr)
-        df_corr=pd.concat([df_corr,metadata.reset_index(drop=True)],axis=1)
-        df_corr.to_csv('../data/reduced/correlation_reduced.csv',index=False,sep=';')
-
-        df_importance=pd.DataFrame(X_importance,columns=features_importance)
-        df_importance=pd.concat([df_importance,metadata.reset_index(drop=True)],axis=1)
-        df_importance.to_csv('../data/reduced/feature_selected.csv',index=False,sep=';')
-
-        pca_columns=[f'PC{i+1}' for i in range(X_pca.shape[1])]
-        df_pca=pd.DataFrame(X_pca,columns=pca_columns)
-        df_pca=pd.concat([df_pca,metadata.reset_index(drop=True)],axis=1)
-        df_pca.to_csv('../data/reduced/pca_reduced.csv',index=False,sep=',')
-    
-    def save_models_bovine(self):
-        joblib.dump(self.variance_threshold,'../models/bovine_variance_threshold.pkl')
-        joblib.dump(self.selector,'../models/bovine_feature_selector.pkl')
-        joblib.dump(self.pca,'../models/bovine_pca_transformer.pkl')
-        joblib.dump(self.scaler,'../models/bovine_standard_scaler.pkl')
-        if self.correlation_mask is not None:
-            joblib.dump(self.correlation_mask,'../models/bovine_correlation_mask.pkl')
+    def verify_consistency(self,human_pca,bovine_pca):
+        print("Dimenzije PCA: ")
+        print(f"Humani {human_pca.shape}")
+        print(f"Bovine {bovine_pca.shape}")
+        if human_pca.shape[1]==bovine_pca.shape[1]:
+            print("Dimenzije su identicne")
         else:
-            print('Bovine corr mask nije pronadjen, te nije ni sacuvan')
-    def save_models(self):
-        joblib.dump(self.variance_threshold,'../models/variance_threshold.pkl')
-        joblib.dump(self.selector,'../models/feature_selector.pkl')
-        joblib.dump(self.pca,'../models/pca_transformer.pkl')
-        joblib.dump(self.scaler,'../models/standard_scaler.pkl')
-        if self.correlation_mask is not None:
-            joblib.dump(self.correlation_mask,'../models/correlation_mask.pkl')
-        else:
-            print('Corr mask nije pronadjen, te nije ni sacuvan')
+            print("Dimenzije PCA se razlikuju :(")
+        
+        for i in range(1,min(4,human_pca.shape[1])): #pc1,pc2,pc3
+            pc_col=f'PC{i}'
+            h_mean=human_pca[pc_col].mean()
+            h_std=human_pca[pc_col].std()
+            b_mean=bovine_pca[pc_col].mean()
+            b_std=bovine_pca[pc_col].std()
+
+            print(f"{pc_col}:")
+            print(f"Humani: Mean({h_mean:>8.4f}), std({h_std:>8.4f})")
+            print(f"Bovine: Mean({b_mean:>8.4f}), std({b_std:>8.4f})")
+
+        fig=plt.figure(figsize=(16,12))
+        #humani pc1 vs pc2
+        ax1=plt.subplot(2,2,1)
+        scatter1=ax1.scatter(human_pca['PC1'],human_pca['PC2'],c=human_pca['pKi'],cmap='viridis',alpha=0.6,s=40,edgecolors='k',linewidth=0.5)
+        ax1.set_xlabel('PC1')
+        ax1.set_ylabel('PC2')
+        ax1.set_title('Human PC1 vs PC2',fontweight='bold',fontsize=12)
+        ax1.grid(True,alpha=0.3)
+        cbar1=plt.colorbar(scatter1,ax=ax1)
+        cbar1.set_label('pKi',rotation=270,labelpad=15)
+
+        #bovine pc1 vs pc2
+        ax2=plt.subplot(2,2,2)
+        scatter2=ax2.scatter(bovine_pca['PC1'],bovine_pca['PC2'],c=bovine_pca['pKi'],cmap='viridis',alpha=0.6,s=40,edgecolors='k',linewidth=0.5)
+        ax2.set_xlabel('PC1')
+        ax2.set_ylabel('PC2')
+        ax2.set_title('Bovine PC1 vs PC2',fontweight='bold',fontsize=12)
+        ax2.grid(True,alpha=0.3)
+        cbar2=plt.colorbar(scatter2,ax=ax2)
+        cbar2.set_label('pKi',rotation=270,labelpad=15)
+
+        #humani + bovine
+        ax3=plt.subplot(2,2,3)
+        ax3.scatter(human_pca['PC1'],human_pca['PC2'],c='blue',alpha=0.5,s=30,edgecolors='darkblue',linewidth=0.3,label=f'Human (n={len(human_pca)})')
+        ax3.scatter(bovine_pca['PC1'],bovine_pca['PC2'],c='red',alpha=0.5,s=30,edgecolors='darkred',linewidth=0.3,label=f'Bovine (n={len(bovine_pca)})')
+        ax3.set_xlabel('PC1')
+        ax3.set_ylabel('PC2')
+        ax3.set_title('Human vs Bovine',fontweight='bold',fontsize=12)
+        ax3.legend(loc='best',framealpha=0.9)
+        ax3.grid(True,alpha=0.3)
+
+        #pc1 distribucije
+        ax4=plt.subplot(2,2,4)
+        ax4.hist(human_pca['PC1'],bins=50,alpha=0.6,label='Human',density=True,color='blue',edgecolor='darkblue',linewidth=0.5)
+        ax4.hist(bovine_pca['PC1'],bins=50,alpha=0.6,label='Bovine',density=True,color='red',edgecolor='darkred',linewidth=0.5)
+        h_mean=human_pca['PC1'].mean()
+        b_mean=bovine_pca['PC1'].mean()
+        ax4.axvline(h_mean,color='blue',linestyle='--',linewidth=2,label=f'Human mean: {h_mean:.2f}')
+        ax4.axvline(b_mean,color='red',linestyle='--',linewidth=2,label=f'Bovine mean: {b_mean:.2f}')
+        ax4.set_xlabel('PC1')
+        ax4.set_ylabel('Density')
+        ax4.set_title('PC1 Distribution comparison',fontweight='bold',fontsize=12)
+        ax4.legend(loc='best',framealpha=0.9)
+        ax4.grid(True,alpha=0.3,axis='y')
+        plt.tight_layout()
+        plt.savefig('../results/comparison.png',dpi=300,bbox_inches='tight')
+        plt.close()
+
+        fig2,axes=plt.subplots(1,3,figsize=(18,5))
+        scatter_h=axes[0].scatter(human_pca['PC2'],human_pca['PC3'],c=human_pca['pKi'],cmap='viridis',alpha=0.6,s=30)
+        axes[0].set_xlabel('PC2')
+        axes[0].set_ylabel('PC3')
+        axes[0].set_title('Human PC2 vs PC3',fontweight='bold')
+        axes[0].grid(True,alpha=0.3)
+        plt.colorbar(scatter_h,ax=axes[0],label='pKi')
+
+        scatter_b=axes[1].scatter(bovine_pca['PC2'],bovine_pca['PC3'],c=bovine_pca['pKi'],cmap='viridis',alpha=0.6,s=30)
+        axes[1].set_xlabel('PC2')
+        axes[1].set_ylabel('PC3')
+        axes[1].set_title('Bovine PC2 vs PC3',fontweight='bold')
+        axes[1].grid(True,alpha=0.3)
+        plt.colorbar(scatter_b,ax=axes[1],label='pKi')
+
+        #overlay
+        axes[2].scatter(human_pca['PC2'],human_pca['PC3'],alpha=0.5,s=20,c='blue',label='Human')
+        axes[2].scatter(bovine_pca['PC2'],bovine_pca['PC3'],alpha=0.5,s=20,c='red',label='Bovine')
+        axes[2].set_xlabel('PC2')
+        axes[2].set_ylabel('PC3')    
+        axes[2].set_title('PC2 vs PC3', fontweight='bold')
+        axes[2].legend()
+        axes[2].grid(True,alpha=0.3)
+        plt.tight_layout()
+        plt.savefig('../results/comparison_pc2_pc3.png',dpi=300,bbox_inches='tight')
+        plt.close()
 
 def main():
-    reducer_human=DimensionalityReducer(
-        n_components=100,
-        k_best=200,
-        correlation_threshold=0.95
-    )
-    results_human=reducer_human.run_analysis(features_path="../data/features/human_trypsin_features.csv",plot_prefix="human")
-    
-    reducer_bovine=DimensionalityReducer(
-        n_components=100,
-        k_best=200,
-        correlation_threshold=0.95
-    )
-    
-    results_bovine=reducer_bovine.run_analysis_bovine(features_path="../data/features/bovine_trypsin_features.csv",human_features_path="../models/human_selected_features.csv")
-     # PROVERA KONZISTENTNOSTI
-    print("\n" + "="*60)
-    print("PROVERA KONZISTENTNOSTI")
-    print("="*60)
-    
-    # Učitaj sačuvane PCA podatke
-    human_pca = pd.read_csv("../data/reduced/pca_reduced.csv")
-    bovine_pca = pd.read_csv("../data/reduced/bovine_pca_reduced.csv")
-    
-    # 1. Proveri da li su kolone iste
-    human_cols = [c for c in human_pca.columns if c.startswith('PC')]
-    bovine_cols = [c for c in bovine_pca.columns if c.startswith('PC')]
-    
-    print(f"Human PCA columns: {human_cols[:5]}...")
-    print(f"Bovine PCA columns: {bovine_cols[:5]}...")
-    
-    if human_cols == bovine_cols:
-        print("✅ Kolone su iste")
-    else:
-        print("❌ Kolone se razlikuju!")
-    
-    # 2. Proveri distribucije PC1
-    print(f"\nPC1 distribucija:")
-    print(f"Human - Mean: {human_pca['PC1'].mean():.4f}, Std: {human_pca['PC1'].std():.4f}")
-    print(f"Bovine - Mean: {bovine_pca['PC1'].mean():.4f}, Std: {bovine_pca['PC1'].std():.4f}")
-    
-    # 3. Proveri PCA loadings (ovo je KLJUČNO!)
-    # Učitaj PCA transformer-e
-    human_pca_model = joblib.load('../models/pca_transformer.pkl')
-    bovine_pca_model = joblib.load('../models/bovine_pca_transformer.pkl')
-    
-    print(f"\nPCA Loadings comparison (prvih 5 komponenti, prvih 5 features):")
-    print("Human PCA components[:5, :5]:")
-    print(human_pca_model.components_[:5, :5])
-    print("\nBovine PCA components[:5, :5]:")
-    print(bovine_pca_model.components_[:5, :5])
-    
-    # Izračunaj sličnost
-    if hasattr(human_pca_model, 'components_') and hasattr(bovine_pca_model, 'components_'):
-        similarity = np.abs(human_pca_model.components_[:10].flatten() - 
-                           bovine_pca_model.components_[:10].flatten()).mean()
-        print(f"\nPCA Loadings razlika (srednja apsolutna): {similarity:.6f}")
-        if similarity > 0.1:
-            print("❌ PCA loadings su DRUGAČIJI - pipeline NIJE konzistentan!")
-        else:
-            print("✅ PCA loadings su slični - pipeline je konzistentan")
-    return results_human,results_bovine
+
+    os.makedirs("../results",exist_ok=True)
+    os.makedirs("../data/reduced/consistent",exist_ok=True)
+    os.makedirs("../models/saved_data",exist_ok=True)
+
+    #ucitavanje podataka
+    human_feats=pd.read_csv("../data/features/human_trypsin_features.csv")
+    X_human=human_feats.drop(['Smiles','pKi','source'],axis=1).values
+    y_human=human_feats['pKi'].values
+    human_features_names=human_feats.drop(['Smiles','pKi','source'],axis=1).columns.tolist()
+    metadata_human=human_feats[['Smiles','pKi','source']].copy()
+
+    bovine_feats=pd.read_csv("../data/features/bovine_trypsin_features.csv")
+    X_bovine=bovine_feats.drop(['Smiles','pKi','source'],axis=1).values
+    y_bovine=bovine_feats['pKi'].values
+    bovine_feature_names=bovine_feats.drop(['Smiles','pKi','source'],axis=1).columns.tolist()
+    metadata_bovine=bovine_feats[['Smiles','pKi','source']].copy()
+    print("Ucitani podaci: ")
+    print(f'Humani {X_human.shape[0]:>4} uzoraka x {X_human.shape[1]:>4} features')
+    print(f"Bovine {X_bovine.shape[0]:>4} uzoraka x {X_bovine.shape[1]:>4} features")
+
+    human_reducer=DimensionalityReducer(n_components=100,k_best=200,correlation_threshold=0.95)
+    human_reducer.original_df=human_feats
+    human_reducer.metadata=metadata_human
+    X_human_pca=human_reducer.fit(X_human,y_human,human_features_names,plot_prefix="human")
+
+    human_reducer.original_df=bovine_feats
+    human_reducer.metadata=metadata_bovine
+
+    X_bovine_pca=human_reducer.transform(X_bovine,bovine_feature_names,plot_prefix="bovine")
+
+    human_pca_df=pd.DataFrame(X_human_pca,columns=[f'PC{i+1}' for i in range(X_human_pca.shape[1])])
+    human_pca_df=pd.concat([human_pca_df,metadata_human.reset_index(drop=True)],axis=1)
+
+    bovine_pca_df=pd.DataFrame(X_bovine_pca,columns=[f'PC{i+1}' for i in range(X_bovine_pca.shape[1])])
+    bovine_pca_df=pd.concat([bovine_pca_df,metadata_bovine.reset_index(drop=True)],axis=1)
+
+    combined_pca_df=pd.concat([human_pca_df,bovine_pca_df],ignore_index=True)
+
+    human_pca_df.to_csv("../data/reduced/consistent/human_pca.csv",sep=';',index=False)
+    bovine_pca_df.to_csv("../data/reduced/consistent/bovine_pca.csv",sep=';',index=False)
+    combined_pca_df.to_csv("../data/reduced/consistent/mixed_pca.csv",sep=';',index=False)
+
+    print("Sacuvani datasetovi: ")
+    print(f"Humani PCA: {human_pca_df.shape}")
+    print(f"Bovine PCA: {bovine_pca_df.shape}")
+    print(f"Mixed PCA: {combined_pca_df.shape}")
+
+    human_reducer.save()
+    human_reducer.verify_consistency(human_pca_df,bovine_pca_df)
+    return human_reducer,human_pca_df,bovine_pca_df,combined_pca_df
 
 if __name__=="__main__":
-    results_h,results_b=main()
+    reducer,results_h,results_b,results_mixed=main()
