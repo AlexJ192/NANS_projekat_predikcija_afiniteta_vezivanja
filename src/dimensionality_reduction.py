@@ -26,6 +26,10 @@ class DimensionalityReducer:
         self.selected_feature_names=None #top k features
         self.feature_mask=None #koje kolone su izabrane
 
+        self.original_feature_names=None #features iz humanog
+        self.is_fitted=False #da li je treniran na humanom
+        self.variance_mask=None #boolean maska za variance thresh
+
     def load_data(self,features_path):
         df=pd.read_csv(features_path)
         self.original_df=df.copy() #cuvanje originalnih podataka
@@ -60,7 +64,7 @@ class DimensionalityReducer:
         variances=np.var(X_scaled,axis=0) #racuna varijansu za svaki feature
 
 
-        
+        #
         print(f"\nVariances sample (first 10):")
         for i in range(min(10, len(variances))):
             print(f"  Feature {i}: {variances[i]:.10f}")
@@ -77,7 +81,7 @@ class DimensionalityReducer:
         print(f"  Exactly 0 variance: {zero_var}")
         print(f"  ~1 variance (±1e-5): {one_var}")
         print(f"  Other values: {other_var}")
-
+        #
 
 
         variance_stats=pd.Series(variances).describe()
@@ -115,6 +119,9 @@ class DimensionalityReducer:
         self.variance_threshold.fit(X_scaled)
         X_variance=self.variance_threshold.transform(X_scaled)
         kept_feat_mask=self.variance_threshold.get_support()
+
+        self.variance_mask=kept_feat_mask #cuvanje variance maske za transform
+
         if feature_names is not None:
             kept_feat=[feature_names[i] for i in range(len(feature_names)) if kept_feat_mask[i]]
         else:
@@ -124,6 +131,8 @@ class DimensionalityReducer:
         print(f"Sacuvani features: {X_variance.shape[1]}")
         print(f"Uklonjeni features: {original_shape[1] - X_variance.shape[1]}")
         print(f"Procenat uklonjenih features: {(1-X_variance.shape[1]/original_shape[1])*100:.1f} %")
+
+        self.variance_result={'X':X_original_filtered,'kept_features':kept_feat} #cuvamo rezultat
         return X_original_filtered,kept_feat
     
     def analyze_correlations(self,X,feature_names,plot=True,plot_prefix=""):
@@ -169,6 +178,7 @@ class DimensionalityReducer:
         print(f"Sacuvani features: {X_corr.shape[1]}")
         print(f"Uklonjeni features: {X.shape[1]-X_corr.shape[1]}")
 
+        self.correlation_result={'X':X_corr,'kept_features':kept_features} #cuvamo rez
         return X_corr,kept_features
     
     def plot_correlation_analysis(self,corr_matrix,high_corr_pairs,feature_names,plot_prefix=""):
@@ -265,6 +275,8 @@ class DimensionalityReducer:
         print(f"Minimalna f-test vrednost u selektovanim: {importance_df.iloc[self.k_best-1]['F_Score']:.4f}")
         print(f"Maksimalna f-test vrednost u neselektovanim: {importance_df.iloc[self.k_best]['F_Score']:.4f}")
 
+        self.importance_result={'X':X_selected,'kept_features':selected_features}
+
         return X_selected,selected_features
     
     def plot_feature_importance(self,importance_df,plot_prefix=""):
@@ -335,7 +347,8 @@ class DimensionalityReducer:
                 feature_name=feature_names[index] if index<len(feature_names) else f"Feature_{index}"
                 loading_value=component_loadings[index]
                 print(f"{feature_name}: {loading_value:.4f}")
-    
+
+        self.pca_result={'X':X_pca} #cuvamo rez
         return X_pca
     
     def plot_pca_analysis(self,explained_variance,cumulative_variance,X_pca,feature_names,plot_prefix=""):
@@ -447,6 +460,94 @@ class DimensionalityReducer:
             print(f"     - Final dimensions: {self.n_components}")
             print(f"     - Overall reduction: {((original_features - self.n_components)/original_features)*100:.1f}%")
         
+    
+    
+    def apply_saved_feat_selection(self,X,y,feature_names,saved_features_path):
+        saved_features=pd.read_csv(saved_features_path)
+        selected_feat_names=saved_features['feature_name'].tolist()
+
+        #
+        print(f"Broj prethodno odabranih features: {len(selected_feat_names)}")
+        print(f"Primer odabranih features: {selected_feat_names[:5]}")
+        #
+
+        kept_indices=[]
+        kept_features=[]
+
+        for i,feature_name in enumerate(feature_names):
+            if feature_name in selected_feat_names:
+                kept_indices.append(i)
+                kept_features.append(feature_name)
+        X_selected=X[:,kept_indices]
+        print(f"Finalne dimenzije: {X_selected.shape}")
+        return X_selected,kept_features
+
+    def save_selected_features(self,feature_names,prefix):
+        features_df=pd.DataFrame({'feature_name':feature_names, 'rank':range(1,len(feature_names)+1)})
+        feature_file=f"../models/{prefix}_selected_features.csv"
+        features_df.to_csv(feature_file,index=False,sep=";")
+        self.selected_feature_names=feature_names
+
+    def _align_features(self,X,current_features,expected_features):
+        curr_feat_map={name:index for index,name in enumerate(current_features)}
+        n_samples=X.shape[0]
+        n_expected=len(expected_features)
+        X_aligned=np.zeros((n_samples,n_expected))
+        missing_feats=[]
+        extra_feats=[]
+        matched_feats=0
+        for exp_index,exp_feature in enumerate(expected_features):
+            if exp_feature in curr_feat_map:
+                curr_index=curr_feat_map[exp_feature]
+                X_aligned[:,exp_index]=X[:,curr_index]
+                matched_feats+=1
+            else:
+                X_aligned[:,exp_index]=0.0 #marker za missing, ne stavljamo vrednist na 0
+                missing_feats.append(exp_feature)
+        expected_set=set(expected_features)
+        for curr_feat in current_features:
+            if curr_feat not in expected_set:
+                extra_feats.append(curr_feat)
+        aligment={
+            'n_matched':matched_feats,
+            'n_missing':len(missing_feats),
+            'n_extra':len(extra_feats),
+            'missing_examples':missing_feats[:10],
+            'extra_examples':extra_feats[:10],
+            'match_percentage':(matched_feats/n_expected)*100
+        }
+        return X_aligned,aligment
+    
+    def _plot_bovine_pca(self,X_pca,plot_prefix="bovine"):
+        y=self.metadata['pKi'].values
+        fig,axes=plt.subplots(1,2,figsize=(14,5))
+        #pc1 vs pc2
+        scatter=axes[0].scatter(X_pca[:,0],X_pca[:,1],c=y,cmap='viridis',alpha=0.6,s=30,edgecolors='k',linewidth=0.5)
+        axes[0].set_xlabel(f'PC1 ({self.pca.explained_variance_ratio_[0]*100:.1f}%)')
+        axes[0].set_ylabel(f'PC2 ({self.pca.explained_variance_ratio_[1]*100:.1f}%)')
+        axes[0].set_title(f'{plot_prefix.upper()}:PC1 vs PC2') #colored by pKi
+        axes[0].grid(True,alpha=0.3)
+        cbar=plt.colorbar(scatter,ax=axes[0])
+        cbar.set_label('pKi',rotation=270,labelpad=15)
+
+        axes[1].hist(X_pca[:,0],bins=50,alpha=0.7,edgecolor='black',color='steelblue')
+        axes[1].set_xlabel('PC1')
+        axes[1].set_ylabel('Frequency')
+        axes[1].set_title(f'{plot_prefix.upper()}: PC1 Distribution')
+        axes[1].grid(True,alpha=0.3,axis='y')
+
+        mean_pc1=X_pca[:,0].mean()
+        std_pc1=X_pca[:,0].std()
+        axes[1].axvline(mean_pc1,color='red',linestyle='--',linewidth=2, label=f'Mean: {mean_pc1:.2f}')
+        axes[1].axvline(mean_pc1+std_pc1,color='orange',linestyle=':',linewidth=1.5, label=f'+-1 Std: {std_pc1:.2f}')
+        axes[1].axvline(mean_pc1-std_pc1,color='orange',linestyle=':',linewidth=1.5)
+        axes[1].legend()
+
+        plt.tight_layout()
+        plt.savefig(f'../results/{plot_prefix}_pca_overview.png',dpi=300,bbox_inches='tight')
+        plt.close()
+        
+
     def run_analysis(self,features_path,plot_prefix="human",use_saved_features=False,saved_features_path=None):
         os.makedirs("../results",exist_ok=True)
         os.makedirs("../data/reduced",exist_ok=True)
@@ -457,22 +558,14 @@ class DimensionalityReducer:
         y=metadata['pKi']
 
         X_variance,kept_variance=self.analyze_variance(X_original,plot_prefix=plot_prefix)
-        self.variance_result={
-            'X':X_variance,
-            'kept_features':kept_variance
-        }
-
+        
         X_corr,kept_corr=self.analyze_correlations(X_variance,kept_variance,plot_prefix=plot_prefix)
-        self.correlation_result={
-            'X':X_corr,
-            'kept_features':kept_corr
-        }
 
-        X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr,plot_prefix=plot_prefix)
-        self.importance_result={
-            'X':X_importance,
-            'kept_features':kept_importance
-        }
+        if use_saved_features and saved_features_path:
+            X_importance,kept_importance=self.apply_saved_feat_selection(X_corr,y,kept_corr,saved_features_path)
+        else:
+            X_importance,kept_importance=self.analyze_feature_importance(X_corr,y,kept_corr,plot_prefix=plot_prefix)
+            self.save_selected_features(kept_importance,plot_prefix)
 
         X_pca=self.apply_pca(X_importance,kept_importance,plot_prefix=plot_prefix)
         self.pca_result={
@@ -483,18 +576,19 @@ class DimensionalityReducer:
             self.save_models()
         else:
             self.save_reduced_datasets_bovine(X_variance,X_corr,X_importance,X_pca,kept_variance,kept_corr,kept_importance,metadata)
-            self.save_models_bovine
+            self.save_models_bovine()
 
         self.generate_summary()
         return {
-            'variance':self.variance_result,
-            'correlation':self.correlation_result,
-            'importance':self.importance_result,
-            'pca':self.pca_result
+            'variance':{'X':X_variance,'kept_features':kept_variance},
+            'correlation':{'X':X_corr,'kept_features':kept_corr},
+            'importance':{'X':X_importance,'kept_features':kept_importance},
+            'pca':{'X':X_pca}
         }
     
-    def run_analysis_bovine(self,features_path,plot_prefix="bovine"):
-       return self.run_analysis(features_path,plot_prefix)
+    def run_analysis_bovine(self,features_path,human_features_path):
+       return self.run_analysis(features_path=features_path,plot_prefix="bovine",use_saved_features=True,saved_features_path=human_features_path)
+    
     def save_reduced_datasets_bovine(self,X_variance,X_corr,X_importance,X_pca,features_variance,features_corr,features_importance,metadata):
         df_variance=pd.DataFrame(X_variance,columns=features_variance)
         df_variance=pd.concat([df_variance,metadata.reset_index(drop=True)],axis=1)
@@ -564,7 +658,53 @@ def main():
         correlation_threshold=0.95
     )
     
-    results_bovine=reducer_bovine.run_analysis_bovine(features_path="../data/features/bovine_trypsin_features.csv",plot_prefix="bovine")
+    results_bovine=reducer_bovine.run_analysis_bovine(features_path="../data/features/bovine_trypsin_features.csv",human_features_path="../models/human_selected_features.csv")
+     # PROVERA KONZISTENTNOSTI
+    print("\n" + "="*60)
+    print("PROVERA KONZISTENTNOSTI")
+    print("="*60)
+    
+    # Učitaj sačuvane PCA podatke
+    human_pca = pd.read_csv("../data/reduced/pca_reduced.csv")
+    bovine_pca = pd.read_csv("../data/reduced/bovine_pca_reduced.csv")
+    
+    # 1. Proveri da li su kolone iste
+    human_cols = [c for c in human_pca.columns if c.startswith('PC')]
+    bovine_cols = [c for c in bovine_pca.columns if c.startswith('PC')]
+    
+    print(f"Human PCA columns: {human_cols[:5]}...")
+    print(f"Bovine PCA columns: {bovine_cols[:5]}...")
+    
+    if human_cols == bovine_cols:
+        print("✅ Kolone su iste")
+    else:
+        print("❌ Kolone se razlikuju!")
+    
+    # 2. Proveri distribucije PC1
+    print(f"\nPC1 distribucija:")
+    print(f"Human - Mean: {human_pca['PC1'].mean():.4f}, Std: {human_pca['PC1'].std():.4f}")
+    print(f"Bovine - Mean: {bovine_pca['PC1'].mean():.4f}, Std: {bovine_pca['PC1'].std():.4f}")
+    
+    # 3. Proveri PCA loadings (ovo je KLJUČNO!)
+    # Učitaj PCA transformer-e
+    human_pca_model = joblib.load('../models/pca_transformer.pkl')
+    bovine_pca_model = joblib.load('../models/bovine_pca_transformer.pkl')
+    
+    print(f"\nPCA Loadings comparison (prvih 5 komponenti, prvih 5 features):")
+    print("Human PCA components[:5, :5]:")
+    print(human_pca_model.components_[:5, :5])
+    print("\nBovine PCA components[:5, :5]:")
+    print(bovine_pca_model.components_[:5, :5])
+    
+    # Izračunaj sličnost
+    if hasattr(human_pca_model, 'components_') and hasattr(bovine_pca_model, 'components_'):
+        similarity = np.abs(human_pca_model.components_[:10].flatten() - 
+                           bovine_pca_model.components_[:10].flatten()).mean()
+        print(f"\nPCA Loadings razlika (srednja apsolutna): {similarity:.6f}")
+        if similarity > 0.1:
+            print("❌ PCA loadings su DRUGAČIJI - pipeline NIJE konzistentan!")
+        else:
+            print("✅ PCA loadings su slični - pipeline je konzistentan")
     return results_human,results_bovine
 
 if __name__=="__main__":
