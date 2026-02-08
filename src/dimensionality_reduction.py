@@ -95,8 +95,8 @@ class DimensionalityReducer:
             plt.figure(figsize=(12,5))
             #histogram
             plt.subplot(1,2,1)
-            plt.hist(variances,bins=150,edgecolor='black',alpha=0.7)
-            plt.axvline(x=0.01,color='red',linestyle='--',label='Threshold=0.01')
+            plt.hist(variances,bins=50,edgecolor='black',alpha=0.7,color='purple')
+            plt.axvline(x=0.01,color='blue',linestyle='--',label='Threshold=0.01')
             plt.xlabel('Variance')
             plt.ylabel('Number of features')
             plt.title('Distribution of feature variances')
@@ -106,7 +106,7 @@ class DimensionalityReducer:
             #box plot
             plt.subplot(1,2,2)
             plt.boxplot(variances,vert=False)
-            plt.axvline(x=0.01,color='pink',linestyle='--',label='Threshold=0.01')
+            plt.axvline(x=0.01,color='blue',linestyle='--',label='Threshold=0.01')
             plt.xlabel('Variance')
             plt.title('Box plot of feature variances')
             plt.legend()
@@ -186,14 +186,14 @@ class DimensionalityReducer:
         plt.subplot(2,2,1) #heatmap korelacione matrice
         sample_feat=np.random.choice(feature_names,min(50,len(feature_names)),replace=False) #uzimamo nasumcinih 50 za vizuelizaciju
         sample_corr=corr_matrix.loc[sample_feat,sample_feat]
-        sea.heatmap(sample_corr,cmap='coolwarm',center=0,square=True,cbar_kws={"shrink":0.8})
+        sea.heatmap(sample_corr,cmap='RdPu',center=0,square=True,cbar_kws={"shrink":0.8})
         plt.title(f'Correlation heatmap (50 random features)')
         #distriubucija
         plt.subplot(2,2,2)
         #uzimamo gornji trougao bez  dijagonale
         corr_values=corr_matrix.values[np.triu_indices_from(corr_matrix.values,k=1)]
-        plt.hist(corr_values,bins=50,edgecolor='purple',alpha=0.7)
-        plt.axvline(x=self.correlation_threshold,color='red',linestyle='--',label=f'Threshold={self.correlation_threshold}')
+        plt.hist(corr_values,bins=50,edgecolor='purple',alpha=0.7,color='mediumpurple')
+        plt.axvline(x=self.correlation_threshold,color='deeppink',linestyle='--',label=f'Threshold={self.correlation_threshold}')
         plt.xlabel('Absolute correlation')
         plt.ylabel('Frequency')
         plt.title('Distribution of feature correlations')
@@ -213,7 +213,7 @@ class DimensionalityReducer:
         distance_matrix=1-np.abs(sample_corr)
         condensed_dist=squareform(distance_matrix)
         linkage_matrix=hierarchy.linkage(condensed_dist,method='average')
-        hierarchy.dendrogram(linkage_matrix,labels=sample_corr.columns,leaf_rotation=90,leaf_font_size=8)
+        hierarchy.dendrogram(linkage_matrix,labels=sample_corr.columns,leaf_rotation=90,leaf_font_size=8,link_color_func=lambda x: 'mediumorchid')
         plt.title('Feature clustering dendrogram')
         plt.xlabel('Features')
         plt.ylabel('Distance (1 - |correlation|)')
@@ -227,7 +227,7 @@ class DimensionalityReducer:
             f2_index=list(feature_names).index(top_pair[1])
             #ucitavanje originalnih podataka
             original_X=self.original_df.drop(columns=['Smiles','pKi','source'],errors='ignore')
-            plt.scatter(original_X.iloc[:,f1_index],original_X.iloc[:,f2_index],alpha=0.5,s=20)
+            plt.scatter(original_X.iloc[:,f1_index],original_X.iloc[:,f2_index],alpha=0.5,s=20,color='orchid',edgecolor='darkviolet')
             plt.xlabel(top_pair[0])
             plt.ylabel(top_pair[1])
             plt.title(f'Most correlated pairL r={top_pair[2]:.4f}')
@@ -235,7 +235,7 @@ class DimensionalityReducer:
             z=np.polyfit(original_X.iloc[:,f1_index],original_X.iloc[:,f2_index],1)
             p=np.poly1d(z)
             x_range=np.linspace(original_X.iloc[:,f1_index].min(),original_X.iloc[:,f1_index].max(),100)
-            plt.plot(x_range,p(x_range),"r--",alpha=0.8)
+            plt.plot(x_range,p(x_range),"b--",alpha=0.8)
             plt.grid(True,alpha=0.3)
         plt.tight_layout()
         plt.savefig(f'../results/{plot_prefix}_correlation_analysis.png',dpi=300,bbox_inches='tight')
@@ -284,22 +284,22 @@ class DimensionalityReducer:
         #top feats by f-score
         top_n=20
         top_features=importance_df.head(top_n)
-        axes[0,0].barh(range(top_n),top_features['F_Score'][::-1])
+        axes[0,0].barh(range(top_n),top_features['F_Score'][::-1],color='mediumpurple',edgecolor='purple')
         axes[0,0].set_yticks(range(top_n))
         axes[0,0].set_yticklabels(top_features['Feature'][::-1],fontsize=8)
         axes[0,0].set_xlabel('F-Score')
         axes[0,0].set_title(f'Top {top_n} features by f-score')
         axes[0,0].grid(True,alpha=0.3)
         #distribucija f-scores
-        axes[0,1].hist(importance_df['F_Score'],bins=50,edgecolor='black',alpha=0.7)
-        axes[0,1].axvline(x=importance_df.iloc[self.k_best-1]['F_Score'],color='purple',linestyle='--',label=f'Cutoff for top {self.k_best}')
+        axes[0,1].hist(importance_df['F_Score'],bins=50,edgecolor='darkorchid',color='mediumpurple',alpha=0.7)
+        axes[0,1].axvline(x=importance_df.iloc[self.k_best-1]['F_Score'],color='mediumvioletred',linestyle='--',label=f'Cutoff for top {self.k_best}')
         axes[0,1].set_xlabel('F-Score')
         axes[0,1].set_ylabel('Number of features')
         axes[0,1].set_title('Distribution of f-scores')
         axes[0,1].legend()
         axes[0,1].grid(True,alpha=0.3)
         #scatter plot - f-score vs mutual info
-        axes[1,0].scatter(importance_df['F_Score'],importance_df['Mutual_Info'],alpha=0.5,s=10)
+        axes[1,0].scatter(importance_df['F_Score'],importance_df['Mutual_Info'],alpha=0.5,s=10,color='orchid')
         axes[1,0].set_xlabel('F-Score')
         axes[1,0].set_ylabel('Mutual Information')
         axes[1,0].set_title('F-Score vs Mutual Information')
@@ -308,9 +308,9 @@ class DimensionalityReducer:
         sorted_f=np.sort(importance_df['F_Score'])[::-1]
         cumulative_importance=np.cumsum(sorted_f)/np.sum(sorted_f)
 
-        axes[1,1].plot(range(1,len(cumulative_importance)+1),cumulative_importance)
-        axes[1,1].axhline(y=0.95,color='green',linestyle='--',label=f'95% importance')
-        axes[1,1].axvline(x=self.k_best,color='red',linestyle='--',label=f'Top {self.k_best} features')
+        axes[1,1].plot(range(1,len(cumulative_importance)+1),cumulative_importance,'o-',color='mediumpurple',linewidth=2,markersize=4)
+        axes[1,1].axhline(y=0.95,color='deeppink',linestyle='--',label=f'95% importance',linewidth=2)
+        axes[1,1].axvline(x=self.k_best,color='orchid',linestyle='--',label=f'Top {self.k_best} features',linewidth=2)
         axes[1,1].set_xlabel('Number of features')
         axes[1,1].set_ylabel('Cumulative f-score')
         axes[1,1].set_title('Cumulative feature importance')
@@ -355,16 +355,16 @@ class DimensionalityReducer:
         fig=plt.figure(figsize=(15,10))
         #scree plot
         plt.subplot(2,3,1)
-        plt.plot(range(1,len(explained_variance)+1),explained_variance,'bo-')
+        plt.plot(range(1,len(explained_variance)+1),explained_variance,'o-',color='darkviolet',markersize=5)
         plt.xlabel('Principal component')
         plt.ylabel('Explained variance ratio')
         plt.title('Scree plot')
         plt.grid(True,alpha=0.3)
         #cumulative explained variance
         plt.subplot(2,3,2)
-        plt.plot(range(1,len(cumulative_variance)+1),cumulative_variance,'ro-')
-        plt.axhline(y=0.95,color='green',linestyle='--',label='95% variance')
-        plt.axhline(y=0.90,color='orange',linestyle='--',label='90% variance')
+        plt.plot(range(1,len(cumulative_variance)+1),cumulative_variance,'s-',color='mediumorchid',markersize=4)
+        plt.axhline(y=0.95,color='hotpink',linestyle='--',label='95% variance',linewidth=2)
+        plt.axhline(y=0.90,color='deeppink',linestyle='--',label='90% variance',linewidth=2)
         plt.xlabel('Number of components')
         plt.ylabel('Cumulative explained variance')
         plt.title('Cumulative explained variance')
@@ -372,21 +372,21 @@ class DimensionalityReducer:
         plt.grid(True,alpha=0.3)
         #PC1 vs PC2
         plt.subplot(2,3,3)
-        scatter=plt.scatter(X_pca[:,0],X_pca[:,1],alpha=0.5,s=20)
+        scatter=plt.scatter(X_pca[:,0],X_pca[:,1],alpha=0.5,s=20,color='mediumpurple',edgecolor='darkorchid')
         plt.xlabel(f'PC1 ({explained_variance[0]*100:.1f}% variance)')
         plt.ylabel(f'PC2 ({explained_variance[1]*100:.1f}% variance)')
         plt.title('PC1 vs PC2')
         plt.grid(True,alpha=0.3)
         #biplot
         plt.subplot(2,3,4)
-        plt.scatter(X_pca[:,0],X_pca[:,1],alpha=0.3,s=10)
+        plt.scatter(X_pca[:,0],X_pca[:,1],alpha=0.3,s=10,color='orchid')
 
         loadings=self.pca.components_.T * np.sqrt(self.pca.explained_variance_)
         top_features=5 
         for i in range(top_features):
-            plt.arrow(0,0,loadings[i,0]*3,loadings[i,1]*3,color='r',alpha=0.5,head_width=0.05)
+            plt.arrow(0,0,loadings[i,0]*3,loadings[i,1]*3,color='mediumvioletred',alpha=0.5,head_width=0.05)
             feature_name=feature_names[i] if i<len(feature_names) else f"Feature_{i}"
-            plt.text(loadings[i,0]*3.2,loadings[i,1]*3.2,feature_name,color='r',fontsize=8)
+            plt.text(loadings[i,0]*3.2,loadings[i,1]*3.2,feature_name,color='darkmagenta',fontsize=8)
         
         plt.xlabel('PC1')
         plt.ylabel('PC2')
@@ -401,13 +401,13 @@ class DimensionalityReducer:
         top_loadings=loadings[top_indices,:10]
         top_feature_names=[feature_names[i] for i in top_indices]
 
-        sea.heatmap(top_loadings,cmap='coolwarm',center=0,xticklabels=[f'PC{i+1}' for i in range(10)],yticklabels=top_feature_names)
+        sea.heatmap(top_loadings,cmap='RdPu',center=0,xticklabels=[f'PC{i+1}' for i in range(10)],yticklabels=top_feature_names)
         plt.title('Loadings of top 20 features (first 10PCs)')
 
         plt.subplot(2,3,6)
         x=range(1,len(cumulative_variance)+1)
-        plt.fill_between(x,0,cumulative_variance,alpha=0.3,label='Cumulative')
-        plt.plot(x,explained_variance,'bo-',label='Individual')
+        plt.fill_between(x,0,cumulative_variance,alpha=0.3,label='Cumulative',color='plum')
+        plt.plot(x,explained_variance,'o-',label='Individual',color='purple')
         plt.xlabel('Number of components')
         plt.ylabel('Explained variance ratio')
         plt.title('Variance explained by components')
@@ -530,7 +530,7 @@ class DimensionalityReducer:
         cbar=plt.colorbar(scatter,ax=axes[0])
         cbar.set_label('pKi',rotation=270,labelpad=15)
 
-        axes[1].hist(X_pca[:,0],bins=50,alpha=0.7,edgecolor='black',color='steelblue')
+        axes[1].hist(X_pca[:,0],bins=50,alpha=0.7,edgecolor='black',color='mediumpurple')
         axes[1].set_xlabel('PC1')
         axes[1].set_ylabel('Frequency')
         axes[1].set_title(f'{plot_prefix.upper()}: PC1 Distribution')
@@ -538,9 +538,9 @@ class DimensionalityReducer:
 
         mean_pc1=X_pca[:,0].mean()
         std_pc1=X_pca[:,0].std()
-        axes[1].axvline(mean_pc1,color='red',linestyle='--',linewidth=2, label=f'Mean: {mean_pc1:.2f}')
-        axes[1].axvline(mean_pc1+std_pc1,color='orange',linestyle=':',linewidth=1.5, label=f'+-1 Std: {std_pc1:.2f}')
-        axes[1].axvline(mean_pc1-std_pc1,color='orange',linestyle=':',linewidth=1.5)
+        axes[1].axvline(mean_pc1,color='teal',linestyle='--',linewidth=2, label=f'Mean: {mean_pc1:.2f}')
+        axes[1].axvline(mean_pc1+std_pc1,color='orchid',linestyle=':',linewidth=1.5, label=f'+-1 Std: {std_pc1:.2f}')
+        axes[1].axvline(mean_pc1-std_pc1,color='orchid',linestyle=':',linewidth=1.5)
         axes[1].legend()
 
         plt.tight_layout()
@@ -674,8 +674,8 @@ class DimensionalityReducer:
 
         #humani + bovine
         ax3=plt.subplot(2,2,3)
-        ax3.scatter(human_pca['PC1'],human_pca['PC2'],c='blue',alpha=0.5,s=30,edgecolors='darkblue',linewidth=0.3,label=f'Human (n={len(human_pca)})')
-        ax3.scatter(bovine_pca['PC1'],bovine_pca['PC2'],c='red',alpha=0.5,s=30,edgecolors='darkred',linewidth=0.3,label=f'Bovine (n={len(bovine_pca)})')
+        ax3.scatter(human_pca['PC1'],human_pca['PC2'],c='mediumturquoise',alpha=0.5,s=30,edgecolors='teal',linewidth=0.3,label=f'Human (n={len(human_pca)})')
+        ax3.scatter(bovine_pca['PC1'],bovine_pca['PC2'],c='orchid',alpha=0.5,s=30,edgecolors='mediumvioletred',linewidth=0.3,label=f'Bovine (n={len(bovine_pca)})')
         ax3.set_xlabel('PC1')
         ax3.set_ylabel('PC2')
         ax3.set_title('Human vs Bovine',fontweight='bold',fontsize=12)
@@ -684,12 +684,12 @@ class DimensionalityReducer:
 
         #pc1 distribucije
         ax4=plt.subplot(2,2,4)
-        ax4.hist(human_pca['PC1'],bins=50,alpha=0.6,label='Human',density=True,color='blue',edgecolor='darkblue',linewidth=0.5)
-        ax4.hist(bovine_pca['PC1'],bins=50,alpha=0.6,label='Bovine',density=True,color='red',edgecolor='darkred',linewidth=0.5)
+        ax4.hist(human_pca['PC1'],bins=50,alpha=0.6,label='Human',density=True,color='mediumturquoise',edgecolor='teal',linewidth=0.5)
+        ax4.hist(bovine_pca['PC1'],bins=50,alpha=0.6,label='Bovine',density=True,color='orchid',edgecolor='mediumvioletred',linewidth=0.5)
         h_mean=human_pca['PC1'].mean()
         b_mean=bovine_pca['PC1'].mean()
-        ax4.axvline(h_mean,color='blue',linestyle='--',linewidth=2,label=f'Human mean: {h_mean:.2f}')
-        ax4.axvline(b_mean,color='red',linestyle='--',linewidth=2,label=f'Bovine mean: {b_mean:.2f}')
+        ax4.axvline(h_mean,color='darkslategray',linestyle='--',linewidth=2,label=f'Human mean: {h_mean:.2f}')
+        ax4.axvline(b_mean,color='purple',linestyle='--',linewidth=2,label=f'Bovine mean: {b_mean:.2f}')
         ax4.set_xlabel('PC1')
         ax4.set_ylabel('Density')
         ax4.set_title('PC1 Distribution comparison',fontweight='bold',fontsize=12)
@@ -715,8 +715,8 @@ class DimensionalityReducer:
         plt.colorbar(scatter_b,ax=axes[1],label='pKi')
 
         #overlay
-        axes[2].scatter(human_pca['PC2'],human_pca['PC3'],alpha=0.5,s=20,c='blue',label='Human')
-        axes[2].scatter(bovine_pca['PC2'],bovine_pca['PC3'],alpha=0.5,s=20,c='red',label='Bovine')
+        axes[2].scatter(human_pca['PC2'],human_pca['PC3'],alpha=0.5,s=20,c='mediumturquoise',label='Human')
+        axes[2].scatter(bovine_pca['PC2'],bovine_pca['PC3'],alpha=0.5,s=20,c='orchid',label='Bovine')
         axes[2].set_xlabel('PC2')
         axes[2].set_ylabel('PC3')    
         axes[2].set_title('PC2 vs PC3', fontweight='bold')
