@@ -729,7 +729,7 @@ class DimensionalityReducer:
 def main():
 
     os.makedirs("../results",exist_ok=True)
-    os.makedirs("../data/reduced/consistent",exist_ok=True)
+    os.makedirs("../data/reduced",exist_ok=True)
     os.makedirs("../models/saved_data",exist_ok=True)
 
     #ucitavanje podataka
@@ -766,9 +766,9 @@ def main():
 
     combined_pca_df=pd.concat([human_pca_df,bovine_pca_df],ignore_index=True)
 
-    human_pca_df.to_csv("../data/reduced/consistent/human_pca.csv",sep=';',index=False)
-    bovine_pca_df.to_csv("../data/reduced/consistent/bovine_pca.csv",sep=';',index=False)
-    combined_pca_df.to_csv("../data/reduced/consistent/mixed_pca.csv",sep=';',index=False)
+    human_pca_df.to_csv("../data/reduced/human_pca.csv",sep=';',index=False)
+    bovine_pca_df.to_csv("../data/reduced/bovine_pca.csv",sep=';',index=False)
+    combined_pca_df.to_csv("../data/reduced/mixed_pca.csv",sep=';',index=False)
 
     print("Sacuvani datasetovi: ")
     print(f"Humani PCA: {human_pca_df.shape}")
