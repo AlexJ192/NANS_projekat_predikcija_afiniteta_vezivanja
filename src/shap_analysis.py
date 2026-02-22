@@ -21,6 +21,7 @@ class ShapAnalyzer:
         self.y=human_pca['pKi'].values
         self.pc_cols=pc_cols
         print(f"PCA podaci: {self.X_pca.shape}")
+
         self.rf_model=joblib.load("../models/trained/RandomForest_scenario1.pkl") #ucitavanje najboljeg modela
         data=joblib.load("../models/saved_data/data.pkl") #ucitavanje originalnih features-a
         self.pca_transformer=data['pca']
@@ -28,12 +29,8 @@ class ShapAnalyzer:
         self.scaler=data['scaler']
         self.variance_mask=data['variance_mask']
         self.correlation_mask=data['correlation_mask']
-        human_og=pd.read_csv("../data/features/human_trypsin_features.csv",sep=';') #og feat names
-        all_feats=human_og.drop(columns=['Smiles','pKi','source'],errors='ignore').columns.tolist()
-        feats_variance=[all_feats[i] for i in range(len(all_feats)) if self.variance_mask[i]]
-        feats_correlation=[feats_variance[i] for i in self.correlation_mask]
-        selector_mask=self.selector.get_support()
-        self.original_feats_names=[feats_correlation[i] for i in range(len(feats_correlation)) if selector_mask[i]] 
+        selected_feats_df=pd.read_csv("../models/human_selected_features.csv",sep=';')
+        self.original_feats_names=selected_feats_df['feature_name'].tolist() 
         print(f"Broj originalnih features: {len(self.original_feats_names)}")
         print(f"Top 5: {self.original_feats_names[:5]}")
         #replikacija trening mdoela
@@ -59,8 +56,8 @@ class ShapAnalyzer:
         top_indices=np.argsort(mean_abs_shap)[-20:][::-1]
         top_feats=[self.original_feats_names[i] for i in top_indices]
         top_shap_vals=mean_abs_shap[top_indices]
-        fig,ax=plt.subplots(figsize=(10,8))
-        colors=plt.cm.RdYlGn(np.linspace(0.3,0.9,20))[::-1]
+        fig,ax=plt.subplots(figsize=(12,10))
+        colors=plt.cm.Purples(np.linspace(0.4,0.9,20))[::-1]
         bars=ax.barh(range(20),top_shap_vals[::-1],color=colors,edgecolor='black',linewidth=0.5)
         ax.set_yticks(range(20))
         ax.set_yticklabels(top_feats[::-1],fontsize=9)
@@ -68,7 +65,7 @@ class ShapAnalyzer:
         ax.set_title('Top 20 most important features',fontsize=13,fontweight='bold')
         ax.grid(True,alpha=0.3,axis='x')
         for bar,val in zip(bars,top_shap_vals[::-1]):
-            ax.text(val+0.001,bar.get_y()+bar.get_height()/2,f'{val:.4f}',va='center',fontsize=7)
+            ax.text(val+0.002,bar.get_y()+bar.get_height()/2,f'{val:.4f}',va='center',fontsize=7)
         plt.tight_layout()
         plt.savefig(f'{self.output_directory}/shap_summary_bar.png',dpi=300,bbox_inches='tight')
         plt.close()
@@ -79,39 +76,14 @@ class ShapAnalyzer:
         shap_top=self.shape_values_og[:,top_indices]
         X_top=self.X_test_og[:,top_indices]
         feature_names=[self.original_feats_names[i] for i in top_indices]
-        shap_exp=shap.Explanation(values=shap_top,base_values=self.expected_value,data=X_top,feature_names=feature_names)
+        base_value=float(self.expected_value) if np.isscalar(self.expected_value) else float(self.expected_value[0])
+        shap_exp=shap.Explanation(values=shap_top,base_values=base_value,data=X_top,feature_names=feature_names)
         fig,ax=plt.subplots(figsize=(12,8))
         shap.plots.beeswarm(shap_exp,max_display=15,show=False)
         plt.title('Distribution of influence of features',fontsize=13,fontweight='bold',pad=20)
         plt.tight_layout()
         plt.savefig(f'{self.output_directory}/shap_beeswarm.png',dpi=300,bbox_inches='tight')
         plt.close()
-    def plot_waterfall(self):
-        y_pred=self.rf_model.predict(self.X_test_pca)
-        high_pKi=np.argmax(y_pred)
-        low_pKi=np.argmin(y_pred)
-        mid_pKi=np.argmin(np.abs(y_pred-np.median(y_pred)))
-        molecules={
-            'Visoki pKi':high_pKi,
-            'Srednji pKi': mid_pKi,
-            'Niski pKi':low_pKi
-        }
-        mean_abs_shap=np.abs(self.shape_values_og).mean(axis=0)
-        top_indices=np.argsort(mean_abs_shap)[-15:] #top 15 feats
-        feat_names=[self.original_feats_names[i] for i in top_indices]
-        fig,axes=plt.subplots(1,3,figsize=(20,8))
-        for ax,(label,pki) in zip(axes,molecules.items()):
-            shap_mol=self.shape_values_og[pki,top_indices]
-            X_mol=self.X_test_og[pki,top_indices]
-            shap_exp=shap.Explanation(values=shap_mol,base_values=self.expected_value,data=X_mol,feature_names=feat_names)
-            plt.sca(ax)
-            shap.plots.waterfall(shap_exp,max_display=12,show=False)
-            ax.set_title(f'{label}\npKi_pred={y_pred[pki]:.3f},pki_stvarno={self.y_test[pki]:.3f}',fontweight='bold',fontsize=10,pad=10)
-        plt.suptitle('Explanation of prediction for individual molecules',fontsize=10,fontweight='bold',y=1.02)
-        plt.tight_layout()
-        plt.savefig(f'{self.output_directory}/shap_waterfall.png',dpi=300,bbox_inches='tight')
-        plt.close()
-
     def plot_dependence(self):
         mean_abs_shap=np.abs(self.shape_values_og).mean(axis=0)
         top4_indices=np.argsort(mean_abs_shap)[-4:][::-1]
@@ -132,7 +104,7 @@ class ShapAnalyzer:
             z=np.polyfit(feat_vals,shap_vals,1)
             p=np.poly1d(z)
             x_range=np.linspace(feat_vals.min(),feat_vals.max(),100)
-            ax.plot(x_range,p(x_range),'hotpink--',linewidth=1.5,alpha=0.8,label=f'Trend')
+            ax.plot(x_range,p(x_range),linestyle='--',color='hotpink',linewidth=1.5,alpha=0.8,label=f'Trend')
             ax.legend(fontsize=8)
         plt.suptitle('Influence of the top 4 features on prediction of pKi',fontsize=13,fontweight='bold')
         plt.tight_layout()
@@ -174,7 +146,6 @@ class ShapAnalyzer:
         self.compute_shap()
         self.plot_summary_bar()
         self.plot_beeswarm()
-        self.plot_waterfall()
         self.plot_dependence()
         self.print_summary()
 
