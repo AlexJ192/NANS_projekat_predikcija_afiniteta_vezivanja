@@ -205,3 +205,13 @@ def load_models_data():
     
     return models,data
 
+@st.cache_data
+def load_top5_from_db():
+    df=pd.read_csv("../data/features/human_trypsin_features.csv",sep=';')
+    top5=df.nlargest(5,'pKi')[['Smiles','pKi']].reset_index(drop=True)
+    return top5
+
+def predict_pKi(feature_series,model,data,model_name):
+    try:
+        feat_array=feature_series.values.reshape(1,-1)
+        
