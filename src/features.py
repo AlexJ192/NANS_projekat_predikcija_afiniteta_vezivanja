@@ -134,7 +134,37 @@ class FeatureGenerator:
         self.save_features(human_features,bovine_features,mix_features)
 
         return human_features,bovine_features,mix_features
-    
+    def generate_single_molecule_features(smiles):
+        mol=Chem.MolFromSmiles(smiles)
+        if mol is None: #validacija 
+            return None
+        try:
+            #2d deskriptora
+            descriptor_names=[desc[0] for desc in Descriptors.descList]
+            desc_calculator=MoleculeDescriptors.MolecularDescriptorCalculator(descriptor_names)
+            desc_vals=desc_calculator.CalcDescriptors(mol)
+            #morganovi fingerprintovi
+            mfp=AllChem.GetMorganFingerprintAsBitVect(mol,radius=2,nBits=2048)
+            mfp_list=list(mfp)
+            #feat vektor
+            all_feat_names=descriptor_names+[f'MFP_{i}' for i in range(2048)]
+            all_feat_values=list(desc_vals)+mfp_list
+            features=pd.Series(all_feat_values,index=all_feat_names)
+            return features
+        except Exception as e:
+            print(f"Doslo je do greske pri generisanju features-a: {e}")
+            return None
+    def validate_smiles(smiles):
+        if not smiles or not isinstance(smiles,str):
+            return None,False,"SMILES string je prazan ili nije validan"
+        try:
+            mol=Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return None,False,"RDKit ne moze parsirati uneti SMILES format"
+            return mol,True,""
+        except Exception as e:
+            return None,False,f"Doslo je do greske: {e}"
+                
 if __name__=="__main__":
     try:
         feat_generator=FeatureGenerator()
