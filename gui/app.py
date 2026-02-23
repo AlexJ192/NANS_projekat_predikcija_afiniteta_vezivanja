@@ -214,4 +214,20 @@ def load_top5_from_db():
 def predict_pKi(feature_series,model,data,model_name):
     try:
         feat_array=feature_series.values.reshape(1,-1)
-        
+        X_var=feat_array[:,data['variance_mask']]
+        X_corr=feat_array[:,data['correlation_mask']]
+        X_scaled=data['scaler'].transform(X_corr)
+        X_selected=data['selector'].transform(X_scaled)
+        X_pca=data['pca'].transform(X_selected)
+        if model_name=='Random Forest':
+            tree_preds=np.array([tree.predict(X_pca)[0] for tree in model.estimators_])
+            pKi_mean=tree_preds.mean()
+            pKi_std=tree_preds.std()
+        else:
+            pKi_mean=model.predict(X_pca)[0]
+            pKi_std=0.3
+        return pKi_mean,pKi_std
+    except Exception as e:
+        st.error(f"Doslo je do greske pri predikciji: {e}")
+        return None,None
+    
