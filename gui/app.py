@@ -231,3 +231,62 @@ def predict_pKi(feature_series,model,data,model_name):
         st.error(f"Doslo je do greske pri predikciji: {e}")
         return None,None
     
+def generate_txt_report(smiles,mol_descriptors,pKi_mean,pKi_std,summary,reasons,tanimoto_scores):
+    report=f"""
+{"*"*70}
+Izvestaj predikcije afiniteta
+{"*"*70}
+
+SMILES: {smiles}
+
+
+Molekulska masa: {mol_descriptors['MW']:.2f} g/mol
+Lipofilnost: {mol_descriptors['LogP']:.2f}
+Broj vodonik vezujucih donora: {mol_descriptors['HBD']}
+Broj vodonik vezujucih akceptora: {mol_descriptors['HBA']}
+QED(drug-likeness): {mol_descriptors['QED']:.3f}
+Topoloski polarana povrsina: {mol_descriptors['TPSA']:.1f}
+Broj aromaticnih prstenova: {mol_descriptors['NumAromaticRings']}
+Broj rotacionih veza: {mol_descriptors['NumRotatableBonds']}
+3D kompleksnost(Fsp3): {mol_descriptors['FractionCsp3']:.2f}
+
+{"*"*70}
+Analiza kvaliteta inhibitora
+{"*"*70}
+{summary}
+{"*"*70}
+Lipinski pravilo petice
+{"*"*70}
+"""
+    for reason in reasons:
+        report+=f"\n {reason}"
+    
+    report+=f"""
+{"*"*70}
+Predikcija afiniteta vezivanja
+{"*"*70}
+
+Predvidjen pKi: {pKi_mean:.2f} ± {pKi_std:.2f}
+Ki: {10**(-pKi_mean)*1e9:.2f} nM
+
+"""
+    if pKi_mean>=8:
+        report+="Odabrani inhibitor poseduje visok afinitet vezivanja i bice odlican inhibitor.\n"
+    elif pKi_mean>=7:
+        report+="Odabrani inhibitor poseduje dobar afinitet vezivanja i bice realtivno dobar inhibitor\n"
+    elif pKi_mean>=6:
+        report+="Odabrani inhibitor poseduje umeren afinitet vezivanja i moze biti potencijalni kandidat za inhibitor\n"
+    else:
+        report+="Odabrani inhibitor poseduje nizak afinitet vezivanja i najverovatnije nije dobar kadnidat za inhibitor\n"
+    
+    report+=f"""
+{"*"*70}
+Strukturna slicnost sa vec poznatim inhibitorima
+{"*"*70}
+Top 5 najslicnijih inhibitora iz baze podataka:
+"""
+    for i,(smiles_db,pki_db,tanimoto) in enumerate(tanimoto_scores,1):
+        report+=f"\n {i} (Tanimoto {tanimoto:.3f}, pKi: {pki_db:.2f})"
+
+    return report
+
