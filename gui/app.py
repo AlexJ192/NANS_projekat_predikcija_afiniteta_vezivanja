@@ -116,7 +116,7 @@ def analyze_inhibitor_quality(descriptors):
     else:
         reasons.append(f"Molekulska masa({descriptors['MW']:.1f} Da)>500")
 
-    if descriptors['logP']<=5:
+    if descriptors['LogP']<=5:
         reasons.append(f"Lipofilnost({descriptors['LogP']:.2f}) je u intervalu [0,5]")
         score+=1
     else:
@@ -177,8 +177,8 @@ def analyze_inhibitor_quality(descriptors):
 def calculate_tanimoto(mol1,mol2):
     if mol1 is None or mol2 is None:
         return 0.0
-    fp1=AllChem.GetMorganFingerprintAsBitVector(mol1, 2,nBits=2048)
-    fp2=AllChem.GetMorganFingerprintAsBitVector(mol2, 2,nBits=2048)
+    fp1=AllChem.GetMorganFingerprintAsBitVect(mol1, 2,nBits=2048)
+    fp2=AllChem.GetMorganFingerprintAsBitVect(mol2, 2,nBits=2048)
     return DataStructs.TanimotoSimilarity(fp1,fp2)
 
 @st.cache_resource
@@ -290,3 +290,136 @@ Top 5 najslicnijih inhibitora iz baze podataka:
 
     return report
 
+def main():
+    st.title("Prediktor afiniteta vezivanja inhibitora za humani tripsin")
+    models,data=load_models_data()
+    top5_db=load_top5_from_db()
+    if 'history' not in st.session_state:
+        st.session_state.history=[]
+    with st.sidebar:
+        st.header("Podesavanja")
+        model_name=st.selectbox("Izaberi model: ",list(models.keys()),index=0,help="Random forest (RMSE=0.58, R^2=0.90)")
+        st.markdown("---")
+        st.markdown("Informacije o modelu: ")
+        if model_name=='Random Forest':
+            st.success("Najbolji model")
+            st.metric("RMSE","0.58")
+            st.metric("R^2","0.90")
+            st.metric("R^2_adj","0.80")
+        st.markdown("---")
+        st.markdown("Istorija pretrage")
+        if st.session_state.history:
+            for i,item in enumerate(reversed(st.session_state.history[-5:]),1):
+                with st.expander(f"{i}. {item['smiles'][:20]}..."):
+                    st.write(f"pKi: {item['pKi']:.2f}±{item['std']:.2f}")
+        else:
+            st.info("Nema prethodnih pretraga")
+    tab1,tab2=st.tabs(["Predikicja pKi","Analiza karakteristika"])
+    with tab1:
+        st.header("Unos molekula")
+        col1,col2=st.columns([3,1])
+        with col1:
+            smiles_input=st.text_input("Unesite SMILES strukturu: ", placeholder="npr.CC(C)Cc1ccc(cc1)C(C)C(=O)O",help="SMILES notacija molekula")
+        with col2:
+            if st.button("Obriši"):
+                smiles_input=""
+                st.rerun()
+        if smiles_input:
+            mol=Chem.MolFromSmiles(smiles_input)
+            if mol is None:
+                st.error("Uneli ste neodgovarajući SMILES format. Pokušajte ponovo.")
+            col1,col2=st.columns(2)
+            with col1:
+                st.subheader("Struktura molekula")
+                img_bytes=mol_to_image_bytes(mol)
+                st.image(img_bytes,use_column_width=True)
+                if st.button("Predvidi pKi",type="primary",use_container_width=True):
+                    with st.spinner("Predikcija je u toku..."):
+                        features=generate_single_mol_feats(smiles_input)
+                        if features is None:
+                            st.error("Došlo je do greške prilikom generisanja features-a")
+                        else:
+                            pKi_mean,pKi_std=predict_pKi(features,models[model_name],data,model_name)
+                            if pKi_mean is not None:
+                                st.session_state.history.append({'smiles':smiles_input,'pKi':pKi_mean,'std':pKi_std})
+                                st.markdown("---")
+                                st.subheader("Rezultati predikcije")
+                                col_a,col_b,col_c=st.columns(3)
+                                col_a.metric("Predvidjeni pKi ",f"{pKi_mean:.2f}")
+                                col_b.metric("Interval poverenja: ",f"±{pKi_mean:.2f}")
+                                ki_nm=10**(-pKi_mean)*1e9
+                                col_c.metric("Ki",f"{ki_nm:.1f} nM")
+                                st.subheader("Distribucija pKi")
+                                fig,ax=plt.subplots(figsize=(8,4))
+                                ax.hist(top5_db['pKi'],bins=20,alpha=0.6,color='#B8A7D6',edgecolor='black',label='Top 100 iz baze')
+                                ax.axvline(pKi_mean,color="#690978",linewidth=3,linestyle='--',label=f'Korisnikov molekul ({pKi_mean:.2f})')
+                                ax.set_xlabel('pKi')
+                                ax.set_ylabel('Frekvencija')
+                                ax.legend()
+                                ax.grid(alpha=0.3)
+                                st.pyplot(fig)
+                                st.subheader("Strukturna sličnost(Top 5)")
+                                tanimoto_scores=[]
+                                for _,row in top5_db.iterrows():
+                                    mol_db=Chem.MolFromSmiles(row['Smiles'])
+                                    tanimoto=calculate_tanimoto(mol,mol_db)
+                                    tanimoto_scores.append((row['Smiles'],row['pKi'],tanimoto))
+                                tanimoto_scores.sort(key=lambda x: x[2],reverse=True)
+                                df_tanimoto=pd.DataFrame(tanimoto_scores,columns=['SMILES','pKi','Tanimoto'])
+                                st.dataframe(df_tanimoto,use_container_width=True)
+                                st.markdown("---")
+                                col_exp1,col_exp2=st.columns(2)
+                                with col_exp1:
+                                    mol_desc=calculate_descriptors(mol)
+                                    summary,reasons,perc,color_cat=analyze_inhibitor_quality(mol_desc)
+                                    txt_report=generate_txt_report(smiles_input,mol_desc,pKi_mean,pKi_std,summary,reasons,tanimoto_scores)
+                                    st.download_button("Sačuvaj izveštaj(TXT)",txt_report,file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",mime="text/plain",use_container_width=True)
+            with col2:
+                st.subheader("Molekulske karakteristike")
+                descriptors=calculate_descriptors(mol)
+                st.metric("Molekulska masa",f"{descriptors['MW']:.1f}g/mol")
+                st.metric("Lipofilnost",f"{descriptors['LogP']:.2f}")
+                col_hb1,col_hb2=st.columns(2)
+                col_hb1.metric("Broj vodonik vezujucih donora",descriptors['HBD'])
+                col_hb2.metric("Broj vodonik vezujucih akceptora",descriptors['HBA'])
+                st.metric("QED(drug-likeness",f"{descriptors['QED']:.3f}")
+                st.metric("Topološki polarna površina",f"{descriptors['TPSA']:.1f}")
+                st.metric("Broj aromatičnih prstenova",descriptors['NumAromaticRings'])
+                summary,reasons,percentage,color_type=analyze_inhibitor_quality(descriptors)
+                st.markdown("---") 
+                st.progress(percentage/100)
+                if color_type=="success":
+                    st.success(summary)
+                elif color_type=="warning":
+                    st.warning(summary)
+                else:
+                    st.error(summary)
+                with st.expander("Detaljna analiza"):
+                    for reason in reasons:
+                        st.write(reason)
+    with tab2:
+        st.header("Analiza karakteristika")
+        smiles_analysis=st.text_input("SMILES za analizu: ",key="analysis_smiles")
+        if smiles_analysis:
+            mol_a=Chem.MolFromSmiles(smiles_analysis)
+            if mol_a:
+                col_an1,col_an2=st.columns(2)
+                with col_an1:
+                    img_a=mol_to_image_bytes(mol_a)
+                    st.image(img_a)
+                with col_an2:
+                    desc_a=calculate_descriptors(mol_a)
+                    summary_a,reasons_a,perc_a,color_a=analyze_inhibitor_quality(desc_a)
+                    st.subheader("Analiza kvaliteta potencijalnog inhibitora")
+                    if color_a=="success":
+                        st.success(summary_a)
+                    elif color_a=="warning":
+                        st.warning(summary_a)
+                    else:
+                        st.error(summary_a)
+                    st.progress(perc_a/100)
+                    for reason in reasons_a:
+                        st.write(reason)
+
+if __name__=="__main__":
+    main()
