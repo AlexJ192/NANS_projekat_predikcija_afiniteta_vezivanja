@@ -31,6 +31,16 @@ Config={
     "num_modes":9,
     "energy_range":3,
     "max_ligands":10,
+    "cinnamic_derivates":[
+        {
+            "name":"Derivat_Cl",
+            "smiles":"ClC1=CC=C(/C=C/C(OCC2=CC=C(Cl)C=C2)=O)C=C1",
+        },
+        {
+            "name":"Derivat_NO2",
+            "smiles":"ClC1=CC=C(/C=C/C(OCC2=CC=C([N+]([O-])=O)C=C2)=O)C=C1",
+        }
+    ]
 }
 
 def setup_dirs(config):
@@ -256,7 +266,7 @@ class AnalyzeDocking:
         if len(valid)==0:
             return 
         fig,ax=plt.subplots(figsize=(8,7))
-        ax.scatter(valid['pKi_predicted'],valid['docking_pseudo_pKi'],alpha=0.6,s=50,color='purple' edgecolors='black', linewidth=0.5)
+        ax.scatter(valid['pKi_predicted'],valid['docking_pseudo_pKi'],alpha=0.6,s=50,color='purple', edgecolors='black', linewidth=0.5)
         min_val=min(valid['pKi_predicted'].min(),valid['docking_pseudo_pKi'].min())
         max_val=max(valid['pKi_predicted'].max(),valid['docking_pseudo_pKi'].max())
         ax.plot([min_val, max_val],[min_val,max_val],'r--',lw=2,alpha=0.7)
@@ -420,8 +430,12 @@ class Docking:
         merged_df=self.analyzer.merge_results(docking_results,model_predictions,test_df)
         self.analyzer.plot_comparison(merged_df)
         cinnamic_df=self.analyzer.analyze_cinnamic_derivatives(docking_results,model_predictions)
-        self.analyzer.save_results(merged_df)
+        self.analyzer.save_results(merged_df,cinnamic_df)
         self.analyzer.print_summary(merged_df)
         return merged_df,docking_results,cinnamic_df
     
-
+if __name__ == "__main__":
+    print(f"Maksimalan broj liganada: {Config['max_ligands']}")
+    print(f"Exhaustiveness: {Config['exhaustiveness']}")
+    docking=Docking(Config)
+    merged_df, docking_results, cinnamic_df = docking.run()
