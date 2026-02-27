@@ -12,7 +12,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def get_rsquared_adj(model, X,y):
-    '''Returns adjusted r^2 score.'''
     y_pred=model.predict(X)
     r_squared = r2_score(y, y_pred)
     n = X.shape[0]
@@ -35,24 +34,19 @@ class ModelTrainer:
             'GradientBoosting':GradientBoostingRegressor(n_estimators=100,random_state=42)
         }
         self.results={}
-    #priprema
+    
     def load_data(self):
         human=pd.read_csv("../data/reduced/human_pca.csv",sep=';')
         bovine=pd.read_csv("../data/reduced/bovine_pca.csv",sep=';')
         mixed=pd.read_csv("../data/reduced/mixed_pca.csv",sep=';')
         pc_cols=[col for col in human.columns if col.startswith('PC')]
-
-        #humani tripsin
         self.X_human=human[pc_cols].values
         self.Y_human=human['pKi'].values
-        #kravlji tripsin
         self.X_bovine=bovine[pc_cols].values
         self.Y_bovine=bovine['pKi'].values
-        #mixed
         self.X_mixed=mixed[pc_cols].values
         self.Y_mixed=mixed['pKi'].values
         self.source_mixed=mixed['source'].values
-
         print(f'Humani tripsin: {self.X_human.shape[0]} x {self.X_human.shape[1]}')
         print(f'Kravlji tripsin: {self.X_bovine.shape[0]} x {self.X_bovine.shape[1]}')
         print(f'Mixed dataset: {self.X_mixed.shape[0]} x {self.X_mixed.shape[1]}')
@@ -64,16 +58,11 @@ class ModelTrainer:
         print(f'Trening skup: {self.X_train.shape[0]} uzoraka')
         print(f'Validacioni skup: {self.X_val.shape[0]} uzorka')
         print(f'Test skup: {self.X_test.shape[0]} uzoraka')
-
-        #mixed- isti test set, tj samo humani, ostalo ide u treniranje
-        #izvalcenje indeksa humanog tripsina iz mixed
         human_mask=self.source_mixed=='human'
         X_mixed_human=self.X_mixed[human_mask]
         Y_mixed_human=self.Y_mixed[human_mask]
         X_mixed_bovine=self.X_mixed[~human_mask]
         Y_mixed_bovine=self.Y_mixed[~human_mask]
-
-        #humani deo biva deljenj na train val test 
         X_m,_,y_m,_=train_test_split(X_mixed_human,Y_mixed_human,test_size=0.15,random_state=42)
         X_m_train,X_m_val,Y_m_train, Y_m_val=train_test_split(X_m,y_m,test_size=0.15/0.85,random_state=42)
         #mixed train= train humani i ceo kravlji
@@ -81,8 +70,6 @@ class ModelTrainer:
         self.Y_mixed_train=np.concatenate([Y_m_train,Y_mixed_bovine])
         self.X_mixed_val=X_m_val
         self.Y_mixed_val=Y_m_val
-        #sample weights za random forest scenario2
-        #humani 1.0, bovine 0.3
         human_weights=np.ones(len(X_m_train))
         bovine_weights=np.full(len(X_mixed_bovine),0.3)
         self.sample_weights_mixed=np.concatenate([human_weights,bovine_weights])
@@ -132,10 +119,8 @@ class ModelTrainer:
                 model=self._transfer_rf()
             elif name=='GradientBoosting':
                 model=self._transfer_gb()
-            
             validation_metrics=self.evaluate(model,self.X_val,self.Y_val,"Validacioni skup")
             test_metrics=self.evaluate(model,self.X_test,self.Y_test,"Test skup")
-
             scenario_results[name]={'model':model,'val':validation_metrics,'test':test_metrics}
             joblib.dump(model,f"{self.model_directory}/{name}_scenario2.pkl")
         self.results['scenario2']=scenario_results
@@ -152,6 +137,7 @@ class ModelTrainer:
         model.n_estimators=100
         model.fit(self.X_train,self.Y_train)
         return model
+    
     def _transfer_rf(self):
         model=RandomForestRegressor(n_estimators=100,random_state=42,n_jobs=-1)
         model.fit(self.X_mixed_train,self.Y_mixed_train,sample_weight=self.sample_weights_mixed)
@@ -175,7 +161,6 @@ class ModelTrainer:
                 model=RandomForestRegressor(n_estimators=100,random_state=42,n_jobs=-1)
             elif name=='GradientBoosting':
                 model=GradientBoostingRegressor(n_estimators=100,random_state=42)
-            
             #fittovanje na mixed setu
             model.fit(self.X_mixed_train,self.Y_mixed_train)
             validation_metrics=self.evaluate(model,self.X_mixed_val,self.Y_mixed_val,"Validacioni skup")
@@ -186,7 +171,6 @@ class ModelTrainer:
     
     def compare_scenarios(self):
         scenario_labels={'scenario1':'Samo Humani', 'scenario2':'Transfer Learning','scenario3': 'Kombinovani dataset'}
-        #tabela rezultata
         rows=[]
         for sc_key,sc_label in scenario_labels.items():
             if sc_key not in self.results:
@@ -194,7 +178,6 @@ class ModelTrainer:
             for model_name,res in self.results[sc_key].items():
                 rows.append({'Scenario':sc_label,'Model':model_name,'RMSE':round(res['test']['rmse'],4),'R^2':round(res['test']['r2'],4),'R^2_adj':round(res['test']['r2_adj'],4),'MAE':round(res['test']['mae'],4)})
         results_df=pd.DataFrame(rows)
-        #efikasnost transfera
         if 'scenario1' in self.results and 'scenario2' in self.results:
             for model_name in self.model_config.keys():
                 rmse_base=self.results['scenario1'][model_name]['test']['rmse']
@@ -206,7 +189,6 @@ class ModelTrainer:
         print("Rezultati test seta: ")
         print(results_df.to_string(index=False))
         results_df.to_csv(f"{self.output_directory}/model_comparison.csv",index=False)
-
         self._plot_rmse(results_df)
         self._plot_r2(results_df)
         self._plot_r2_adj(results_df)
@@ -252,7 +234,6 @@ class ModelTrainer:
             bars=ax.bar(x+i*width,r2_vals,width,label=sc,color=color,alpha=0.85,edgecolor='black')
             for bar,val in zip(bars,r2_vals):
                 ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+0.005,f'{val:.3f}',ha='center',va='bottom',fontsize=7)
-
         ax.set_xlabel('Model',fontsize=12)
         ax.set_ylabel('R^2',fontsize=12)
         ax.set_title('R^2 Overview',fontsize=13,fontweight='bold')
@@ -300,14 +281,12 @@ class ModelTrainer:
         for ax,(sc_key,(sc_label,color)) in zip(axes,scenarios.items()):
             if sc_key not in self.results:
                 continue
-            #trazimo najbolji model po rmse
             best_name=min(self.results[sc_key],key=lambda m: self.results[sc_key][m]['test']['rmse'])
             best_res=self.results[sc_key][best_name]
             y_pred=best_res['test']['y_pred']
             rmse=best_res['test']['rmse']
             r2=best_res['test']['r2']
             ax.scatter(self.Y_test,y_pred,alpha=0.6,s=30,color=color,edgecolors='k',linewidth=0.4)
-            #idealna linija
             mn=min(self.Y_test.min(),y_pred.min())
             mx=max(self.Y_test.max(),y_pred.max())
             ax.plot([mn,mx],[mn,mx],'k--',linewidth=1.5,label='Optimalna vrednost')
@@ -347,38 +326,39 @@ class ModelTrainer:
         plt.tight_layout()
         plt.savefig(f'{self.output_directory}/transfer_efficiency.png',dpi=300,bbox_inches='tight')
         plt.close()
-    def _plot_residuals(self):
-        scenarios = {
-            'scenario1': ('Samo Humani','orchid'),
-            'scenario2': ('Transfer Learning','teal'),
-            'scenario3': ('Kombinovani dataset','mediumpurple')
-        }
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle('Reziduali',fontsize=14, fontweight='bold', y=1.02)
 
-        for ax, (sc_key, (sc_label, color)) in zip(axes, scenarios.items()):
+    def _plot_residuals(self):
+        scenarios={
+            'scenario1':('Samo Humani','orchid'),
+            'scenario2':('Transfer Learning','teal'),
+            'scenario3':('Kombinovani dataset','mediumpurple')
+        }
+        fig,axes=plt.subplots(1,3,figsize=(18,5))
+        fig.suptitle('Reziduali',fontsize=14,fontweight='bold',y=1.02)
+        for ax,(sc_key, (sc_label, color)) in zip(axes,scenarios.items()):
             if sc_key not in self.results:
                 continue
-            best_name = min(self.results[sc_key],key=lambda m: self.results[sc_key][m]['test']['rmse'])
-            best_res  = self.results[sc_key][best_name]
-            y_pred    = best_res['test']['y_pred']
-            residuals = self.Y_test - y_pred  
-            rmse  = best_res['test']['rmse']
-            r2    = best_res['test']['r2']
-            r2adj = best_res['test']['r2_adj']
-            ax.scatter(y_pred, residuals,alpha=0.6, s=30, color=color,edgecolors='k', linewidth=0.4)
-            ax.axhline(y=0, color='black', linestyle='--',linewidth=1.5, label='optimalna vrednost')
-            ax.axhline(y= rmse, color='deeppink', linestyle=':',linewidth=1, alpha=0.7, label=f'±RMSE ({rmse:.3f})')
-            ax.axhline(y=-rmse, color='deeppink', linestyle=':',linewidth=1, alpha=0.7)
-            ax.set_xlabel('Predviđeni pKi', fontsize=11)
-            ax.set_ylabel('Rezidual', fontsize=11)
-            ax.set_title(f'{sc_label}\n{best_name}', fontweight='bold', fontsize=11)
-            ax.text(0.05, 0.95,f'RMSE={rmse:.3f}\nR²={r2:.3f}\nR²_adj={r2adj:.3f}',transform=ax.transAxes, fontsize=9, va='top',bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            best_name=min(self.results[sc_key],key=lambda m: self.results[sc_key][m]['test']['rmse'])
+            best_res=self.results[sc_key][best_name]
+            y_pred=best_res['test']['y_pred']
+            residuals=self.Y_test - y_pred  
+            rmse=best_res['test']['rmse']
+            r2=best_res['test']['r2']
+            r2adj=best_res['test']['r2_adj']
+            ax.scatter(y_pred, residuals,alpha=0.6,s=30,color=color,edgecolors='k',linewidth=0.4)
+            ax.axhline(y=0,color='black',linestyle='--',linewidth=1.5, label='optimalna vrednost')
+            ax.axhline(y= rmse,color='deeppink',linestyle=':',linewidth=1,alpha=0.7,label=f'±RMSE ({rmse:.3f})')
+            ax.axhline(y=-rmse,color='deeppink',linestyle=':',linewidth=1,alpha=0.7)
+            ax.set_xlabel('Predviđeni pKi',fontsize=11)
+            ax.set_ylabel('Rezidual',fontsize=11)
+            ax.set_title(f'{sc_label}\n{best_name}',fontweight='bold',fontsize=11)
+            ax.text(0.05,0.95,f'RMSE={rmse:.3f}\nR²={r2:.3f}\nR²_adj={r2adj:.3f}',transform=ax.transAxes, fontsize=9, va='top',bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
             ax.legend(fontsize=8)
-            ax.grid(True, alpha=0.3)
+            ax.grid(True,alpha=0.3)
         plt.tight_layout()
         plt.savefig(f'{self.output_directory}/residual_analysis.png',dpi=300, bbox_inches='tight')
         plt.close()
+        
     def activate(self):
         self.load_data()
         self.split_data()

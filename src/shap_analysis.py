@@ -21,9 +21,8 @@ class ShapAnalyzer:
         self.y=human_pca['pKi'].values
         self.pc_cols=pc_cols
         print(f"PCA podaci: {self.X_pca.shape}")
-
-        self.rf_model=joblib.load("../models/trained/RandomForest_scenario1.pkl") #ucitavanje najboljeg modela
-        data=joblib.load("../models/saved_data/data.pkl") #ucitavanje originalnih features-a
+        self.rf_model=joblib.load("../models/trained/RandomForest_scenario1.pkl") 
+        data=joblib.load("../models/saved_data/data.pkl") #ucitavanje originalnih features
         self.pca_transformer=data['pca']
         self.selector=data['selector']
         self.scaler=data['scaler']
@@ -42,6 +41,7 @@ class ShapAnalyzer:
         X_scaled_approx=self.pca_transformer.inverse_transform(X_pca)
         X_og_approx=self.scaler.inverse_transform(X_scaled_approx)
         return X_og_approx
+    
     def compute_shap(self):
         explainer=shap.TreeExplainer(self.rf_model)
         self.shap_values_pca=explainer.shap_values(self.X_test_pca)
@@ -51,6 +51,7 @@ class ShapAnalyzer:
         print(f"X_test_original shape: {self.X_test_og.shape}")
         self.shape_values_og=self.shap_values_pca @ self.pca_transformer.components_
         print(f"Shap shape(og): {self.shape_values_og.shape}")
+
     def plot_summary_bar(self):
         mean_abs_shap=np.abs(self.shape_values_og).mean(axis=0)
         top_indices=np.argsort(mean_abs_shap)[-20:][::-1]
@@ -69,8 +70,8 @@ class ShapAnalyzer:
         plt.tight_layout()
         plt.savefig(f'{self.output_directory}/shap_summary_bar.png',dpi=300,bbox_inches='tight')
         plt.close()
+
     def plot_beeswarm(self):
-        #top 15 feats
         mean_abs_shap=np.abs(self.shape_values_og).mean(axis=0)
         top_indices=np.argsort(mean_abs_shap)[-15:]
         shap_top=self.shape_values_og[:,top_indices]
@@ -84,6 +85,7 @@ class ShapAnalyzer:
         plt.tight_layout()
         plt.savefig(f'{self.output_directory}/shap_beeswarm.png',dpi=300,bbox_inches='tight')
         plt.close()
+
     def plot_dependence(self):
         mean_abs_shap=np.abs(self.shape_values_og).mean(axis=0)
         top4_indices=np.argsort(mean_abs_shap)[-4:][::-1]
@@ -100,7 +102,6 @@ class ShapAnalyzer:
             ax.set_title(f'Dependance:{feat_name}',fontweight='bold',fontsize=11)
             ax.grid(True,alpha=0.3)
             plt.colorbar(scatter,ax=ax,label=feat_name)
-            #trend linija
             z=np.polyfit(feat_vals,shap_vals,1)
             p=np.poly1d(z)
             x_range=np.linspace(feat_vals.min(),feat_vals.max(),100)
