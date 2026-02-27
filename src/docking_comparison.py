@@ -30,8 +30,8 @@ Config={
     "exhaustiveness":15,
     "num_modes":9,
     "energy_range":3,
-    "max_ligands":10,
-    "cinnamic_derivates":[
+    "max_ligands":70,
+    "cinnamic_derivatives":[
         {
             "name":"Derivat_Cl",
             "smiles":"ClC1=CC=C(/C=C/C(OCC2=CC=C(Cl)C=C2)=O)C=C1",
@@ -99,6 +99,8 @@ class PreparationOfLigands:
         total=len(df)
         for index,row in df.iterrows():
             smiles=row[smiles_col]
+            if '.' in smiles:
+                continue
             name=f"ligand_{index}" if name_col is None else str(row[name_col])
             name="".join(c if c.isalnum() or c=='_' else '_' for c in name)
             pdbqt_path=self.smiles_to_pdbqt(smiles,name)
@@ -114,12 +116,12 @@ class DockingRunner:
     def dock_ligand(self,ligand_pdbqt,ligand_name):
         output_pdbqt=os.path.join(self.config["results_dir"],f"{ligand_name}_out.pdbqt")
         log_file=os.path.join(self.config["results_dir"],f"{ligand_name}_log.txt")
+        vina_path=self.config["vina_exe"]
         cmd = [
-                self.config["vina_exe"],
+                vina_path,
                 "--receptor",self.config["tripsin_pdbqt"],
                 "--ligand",ligand_pdbqt,
                 "--out",output_pdbqt,
-                "--log",log_file,
                 "--center_x",str(self.config["center_x"]),
                 "--center_y",str(self.config["center_y"]),
                 "--center_z",str(self.config["center_z"]),
@@ -129,9 +131,11 @@ class DockingRunner:
                 "--exhaustiveness", str(self.config["exhaustiveness"]),
                 "--num_modes",str(self.config["num_modes"]),
                 "--energy_range",str(self.config["energy_range"]),
-            ]    
+            ]  
         try:
             result=subprocess.run(cmd,capture_output=True,text=True,timeout=300,encoding='utf-8',errors='replace')
+            with open(log_file,'w') as fajl:
+                fajl.write(result.stdout)
             best_affinity=self._parse_vina_log(log_file)
             return {
                 'ligand_name':ligand_name,
@@ -409,6 +413,13 @@ class Docking:
             test_df = test_df.sample(n=max_lig, random_state=42).reset_index(drop=True)
         print(f"Test set: {len(test_df)} molekula")
         return test_df
+    """def load_test_set(self):
+        test_df = pd.DataFrame({
+        'Smiles': ['CC(=O)OC1=CC=CC=C1C(=O)O'],  # Aspirin
+        'pKi': [2.5]
+        })
+        print(f"Test set: {len(test_df)} molekula (aspirin)")
+        return test_df"""
     
     def run(self, test_df=None):
         if test_df is None:

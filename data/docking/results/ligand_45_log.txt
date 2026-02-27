@@ -1,0 +1,29 @@
+AutoDock Vina v1.2.6-56-gc28e340
+#################################################################
+# If you used AutoDock Vina in your work, please cite:          #
+#                                                               #
+# J. Eberhardt, D. Santos-Martins, A. F. Tillack, and S. Forli  #
+# AutoDock Vina 1.2.0: New Docking Methods, Expanded Force      #
+# Field, and Python Bindings, J. Chem. Inf. Model. (2021)       #
+# DOI 10.1021/acs.jcim.1c00203                                  #
+#                                                               #
+# O. Trott, A. J. Olson,                                        #
+# AutoDock Vina: improving the speed and accuracy of docking    #
+# with a new scoring function, efficient optimization and       #
+# multithreading, J. Comp. Chem. (2010)                         #
+# DOI 10.1002/jcc.21334                                         #
+#                                                               #
+# Please see https://github.com/ccsb-scripps/AutoDock-Vina for  #
+# more information.                                             #
+#################################################################
+
+Scoring function : vina
+Rigid receptor: ../data/docking/tripsin/1trn_bezliganda.pdbqt
+Ligand: ../data/docking/ligands\ligand_45.pdbqt
+Grid center: X 48.5 Y 21.5 Z 30.5
+Grid size  : X 25 Y 25 Z 25
+Grid space : 0.375
+Exhaustiveness: 15
+CPU: 0
+Verbosity: 1
+

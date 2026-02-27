@@ -1,0 +1,3 @@
+name;smiles;docking_pseudo_pKi;model_pKi
+Derivat_Cl;ClC1=CC=C(/C=C/C(OCC2=CC=C(Cl)C=C2)=O)C=C1;4.732215773736976;
+Derivat_NO2;ClC1=CC=C(/C=C/C(OCC2=CC=C([N+]([O-])=O)C=C2)=O)C=C1;5.683499694774927;
