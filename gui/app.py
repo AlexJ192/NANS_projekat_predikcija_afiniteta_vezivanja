@@ -6,6 +6,7 @@ import seaborn as sea
 from io import BytesIO
 from datetime import datetime
 import base64
+import shap
 from rdkit import Chem
 from rdkit.Chem import Draw,Descriptors,Crippen,Lipinski,AllChem,DataStructs
 from rdkit.ML.Descriptors import MoleculeDescriptors
@@ -202,8 +203,12 @@ def load_models_data():
     data=None
     if data_path.exists():
         data=joblib.load(str(data_path))
-    
-    return models,data
+    feat_names_path=Path("../models/human_selected_features.csv")
+    feat_names=None
+    if feat_names_path.exists():
+        df_names=pd.read_csv(feat_names_path,sep=';')
+        feat_names=df_names['feature_name'].tolist()
+    return models,data,feat_names
 
 @st.cache_data
 def load_top5_from_db():
@@ -226,11 +231,41 @@ def predict_pKi(feature_series,model,data,model_name):
         else:
             pKi_mean=model.predict(X_pca)[0]
             pKi_std=0.3
-        return pKi_mean,pKi_std
+        return pKi_mean,pKi_std,X_pca
     except Exception as e:
         st.error(f"Doslo je do greske pri predikciji: {e}")
-        return None,None
-    
+        return None,None,None
+
+def compute_shap(X_pca,model,data,feature_names,model_name):
+    try:
+        if model_name !='Random Forest':
+            return None
+        explainer=shap.TreeExplainer(model)
+        shap_values_pca=explainer.shap_values(X_pca)
+        shap_values_og=shap_values_pca @ data['pca'].components_
+        abs_shap=np.abs(shap_values_og[0])
+        top3_indices=np.argsort(abs_shap)[-3:][::-1]
+        top3_feat=[]
+        for index in top3_indices:
+            feat_name=feature_names[index]
+            shap_val=shap_values_og[0,index]
+            direction="povecava" if shap_val>0 else "smanjuje"
+            if feat_name.startswith('MFP_'):
+                tip='Morganov fingerprint'
+            elif feat_name.startswith('fr_'):
+                tip='Funkcionalna grupa'
+            elif feat_name in ['qed','MolWt','LogP','TPSA']:
+                tip='Fizicko-hemisjka osobina'
+            elif 'VSA' in feat_name or 'EState' in feat_name:
+                tip='Toploski deskriptor'
+            else:
+                tip='Molekulski deskriptor'
+            top3_feat.append({'name':feat_name,'shap':abs(shap_val),'direction':direction,'type':tip})
+        return top3_feat
+    except Exception as e:
+        print(f"Doslo je do greske prilikom racunjanja shap vrednosti: {e}")
+        return None
+                
 def generate_txt_report(smiles,mol_descriptors,pKi_mean,pKi_std,summary,reasons,tanimoto_scores):
     report=f"""
 {"*"*70}
@@ -292,26 +327,36 @@ Top 5 najslicnijih inhibitora iz baze podataka:
 
 def main():
     st.title("Prediktor afiniteta vezivanja inhibitora za humani tripsin")
-    models,data=load_models_data()
+    models,data,feature_names=load_models_data()
     top5_db=load_top5_from_db()
     if 'history' not in st.session_state:
         st.session_state.history=[]
     with st.sidebar:
         st.header("Podesavanja")
-        model_name=st.selectbox("Izaberi model: ",list(models.keys()),index=0,help="Random forest (RMSE=0.58, R^2=0.90)")
+        model_name=st.selectbox("Izaberi model: ",list(models.keys()),index=0,help="Random forest je najbolji model (RMSE=0.58, R^2=0.90)")
         st.markdown("---")
         st.markdown("Informacije o modelu: ")
-        if model_name=='Random Forest':
-            st.success("Najbolji model")
-            st.metric("RMSE","0.58")
-            st.metric("R^2","0.90")
-            st.metric("R^2_adj","0.80")
+        model_info={
+            'Random Forest':{'rmse':'0.58','r2':'0.90','r2_adj':'0.80','best':True},
+            'Gradient Boosting':{'rmse':'0.61','r2':'0.89','r2_adj':'0.78','best':False},
+            'Lasso':{'rmse':'0.77','r2':'0.83','r2_adj':'0.65','best':False},
+            'Elastic Net':{'rmse':'0.77','r2':'0.83','r2_adj':'0.65','best':False},
+            'Ridge':{'rmse':'0.78','r2':'0.83','r2_adj':'0.64','best':False},
+            'Linear Regression':{'rmse':'0.78','r2':'0.83','r2_adj':'0.64','best':False},
+        }
+        info=model_info.get(model_name,{})
+        if info.get('best'):
+            st.success("Odabrali ste najbolji model")
+        st.metric("RMSE",info.get('rmse','N/A'))
+        st.metric("R^2","N/A")
+        st.metric("R^2_adj","N/A")
         st.markdown("---")
         st.markdown("Istorija pretrage")
         if st.session_state.history:
             for i,item in enumerate(reversed(st.session_state.history[-5:]),1):
                 with st.expander(f"{i}. {item['smiles'][:20]}..."):
                     st.write(f"pKi: {item['pKi']:.2f}±{item['std']:.2f}")
+                    st.write(f"Model: {item.get('model','N/A')}")
         else:
             st.info("Nema prethodnih pretraga")
     tab1,tab2=st.tabs(["Predikicja pKi","Analiza karakteristika"])
@@ -339,9 +384,13 @@ def main():
                         if features is None:
                             st.error("Došlo je do greške prilikom generisanja features-a")
                         else:
-                            pKi_mean,pKi_std=predict_pKi(features,models[model_name],data,model_name)
+                            pKi_mean,pKi_std,X_pca=predict_pKi(features,models[model_name],data,model_name)
                             if pKi_mean is not None:
                                 st.session_state.history.append({'smiles':smiles_input,'pKi':pKi_mean,'std':pKi_std})
+                                shap_feat=None
+                                if model_name=='Random Forest' and feature_names:
+                                    with st.spinner("SHAP izračunavanje u toku..."):
+                                        shap_feat=compute_shap(X_pca,models[model_name],data,feature_names,model_name)
                                 st.markdown("---")
                                 st.subheader("Rezultati predikcije")
                                 col_a,col_b,col_c=st.columns(3)
@@ -349,9 +398,19 @@ def main():
                                 col_b.metric("Interval poverenja: ",f"±{pKi_mean:.2f}")
                                 ki_nm=10**(-pKi_mean)*1e9
                                 col_c.metric("Ki",f"{ki_nm:.1f} nM")
+                                if shap_feat:
+                                    st.markdown("---")
+                                    st.subheader("SHAP analiza")
+                                    st.info("Top 3 najuticajnije karakteristike")
+                                    for i,feat in enumerate(shap_feat,1):
+                                        with st.expander(f"{i}.{feat['name']} ({feat['tip']})"):
+                                            st.write(f"Uticaj: {feat['direction']} predviđeni pKi")
+                                            st.write(f"SHAP vrednost: {feat['shap']:.4f}")
+                                            st.progress(min(feat['shap']/0.2,1.0))
+                                st.markdown("---")
                                 st.subheader("Distribucija pKi")
                                 fig,ax=plt.subplots(figsize=(8,4))
-                                ax.hist(top5_db['pKi'],bins=20,alpha=0.6,color='#B8A7D6',edgecolor='black',label='Top 100 iz baze')
+                                ax.hist(top5_db['pKi'],bins=20,alpha=0.6,color='#B8A7D6',edgecolor='black',label='Top 100 inhibitora iz baze')
                                 ax.axvline(pKi_mean,color="#690978",linewidth=3,linestyle='--',label=f'Korisnikov molekul ({pKi_mean:.2f})')
                                 ax.set_xlabel('pKi')
                                 ax.set_ylabel('Frekvencija')
@@ -373,7 +432,7 @@ def main():
                                     mol_desc=calculate_descriptors(mol)
                                     summary,reasons,perc,color_cat=analyze_inhibitor_quality(mol_desc)
                                     txt_report=generate_txt_report(smiles_input,mol_desc,pKi_mean,pKi_std,summary,reasons,tanimoto_scores)
-                                    st.download_button("Sačuvaj izveštaj(TXT)",txt_report,file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",mime="text/plain",use_container_width=True)
+                                    st.download_button("Preuzmi izveštaj(TXT)",txt_report,file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",mime="text/plain",use_container_width=True)
             with col2:
                 st.subheader("Molekulske karakteristike")
                 descriptors=calculate_descriptors(mol)
