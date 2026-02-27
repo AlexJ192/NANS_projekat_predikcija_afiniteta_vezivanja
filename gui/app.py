@@ -9,6 +9,7 @@ import base64
 import shap
 from rdkit import Chem
 from rdkit.Chem import Draw,Descriptors,Crippen,Lipinski,AllChem,DataStructs
+from rdkit.Chem.Lipinski import FractionCSP3
 from rdkit.ML.Descriptors import MoleculeDescriptors
 import joblib 
 from pathlib import Path
@@ -19,7 +20,8 @@ from reportlab.lib.units import inch
 from reportlab.lib import colors
 import warnings
 warnings.filterwarnings('ignore')
-
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
 st.set_page_config(
     page_title="Prediktor inhibitora tripsina",
     page_icon="icon.png",
@@ -59,6 +61,9 @@ st.markdown("""
     }
     .dataframe{
         border:2px solid #D1C4E1;
+    }
+    .stProgress>div>div>div>div{
+        background-color:#B8A7D6        
     }
 </style>
 """,unsafe_allow_html=True)
@@ -104,20 +109,21 @@ def calculate_descriptors(mol):
         'TPSA':Descriptors.TPSA(mol),
         'NumAromaticRings':Descriptors.NumAromaticRings(mol),
         'NumRotatableBonds':Descriptors.NumRotatableBonds(mol),
-        'FractionCsp3':Descriptors.FractionCsp3(mol),
+        'FractionCsp3':FractionCSP3(mol),
     }
 def analyze_inhibitor_quality(descriptors):
     #lipinski role of five
     reasons=[]
     score=0
-    max_score=8
+    max_score=15
+    #lipinski pravila
     if descriptors['MW']<=500:
         reasons.append(f"Molekulska masa({descriptors['MW']:.1f} Da)<=500")
         score+=1
     else:
         reasons.append(f"Molekulska masa({descriptors['MW']:.1f} Da)>500")
 
-    if descriptors['LogP']<=5:
+    if 0<=descriptors['LogP']<=5:
         reasons.append(f"Lipofilnost({descriptors['LogP']:.2f}) je u intervalu [0,5]")
         score+=1
     else:
@@ -144,31 +150,59 @@ def analyze_inhibitor_quality(descriptors):
         score+=0.5
     else:
         reasons.append(f"QED({qed:.2f}), nizak drug-likeness")
-    
-    if descriptors['TPSA']<=140:
-        reasons.append(f"Topoloski polarna povrsina({descriptors['TPSA']:.1f})<=140")
+    #bonus kriterijumi
+    tpsa=descriptors['TPSA']
+    if tpsa<=60:
+        reasons.append(f"Topoloski polarna povrsina({descriptors['TPSA']:.1f})<=60, podrazumeva odličnu permeabilnost")
+        score+=2
+    elif tpsa<=90:
+        reasons.append(f"Topoloski polarna povrsina({descriptors['TPSA']:.1f})<=90, podrazumeva dobru permeabilnost")
+        score+=1.5
+    elif tpsa<=140:
+        reasons.append(f"Topoloski polarna povrsina({descriptors['TPSA']:.1f})<=140, podrazumeva umerenu permeabilnost")
         score+=1
     else:
         reasons.append(f"Topoloski polarna povrsina({descriptors['TPSA']:.1f})>140, poseduje slabu permeabilnost")
     
-    if descriptors['NumAromaticRings']<=3:
-        reasons.append(f"Optimalan broj aromaticnih prstenova({descriptors['NumAromaticRings']})")
-        score+=1
+    if descriptors['NumAromaticRings']>=1: #tripsin zahteva bar 1 aromaticni prsten
+        reasons.append(f"Broj aromaticnih prstenova: {descriptors['NumAromaticRings']}")
+        score+=2
     else:
-        reasons.append(f"Suboptimalan broj aromaticnih prstenova({descriptors['NumAromaticRings']})")
+        reasons.append(f"Molekul ne poseduje minimalan broj aromaticnih prstenova({descriptors['NumAromaticRings']})")
+    if descriptors['NumAromaticRings']>=2:
+        reasons.append(f"Molekul sadrzi vise aromaticnih prstenova: {descriptors['NumAromaticRings']}")
+        score+=1
 
-    if descriptors['FractionCsp3']>=0.25:
+    if descriptors['FractionCsp3']>=0.3:
         reasons.append(f"Optimalna 3D kompleksnost({descriptors['FractionCsp3']:.2f})")
+        score+=2
+    elif descriptors['FractionCsp3']>=0.1:
+        reasons.append(f"Delimicno ravna struktura({descriptors['FractionCsp3']:.2f})")
         score+=1
     else:
-        reasons.append(f"Ravna struktura({descriptors['FractionCsp3']:.2f})")
+        reasons.append(f"Potpuno ravna struktura({descriptors['FractionCsp3']:.2f})")
 
+    if descriptors['MW']>=200:
+        reasons.append(f"Molekul je dovoljno velik da popuni aktivni centar({descriptors['MW']}g/mol)")
+        score+=2
+    elif descriptors['MW']>=100:
+        reasons.append(f"Molekul moze umereno da popuni aktivni centar({descriptors['MW']}g/mol)")
+        score+=1
+    else:
+         reasons.append(f"Molekul je previse mali da popuni aktivni centar({descriptors['MW']}g/mol)")
+
+    if descriptors['NumRotatableBonds']>=2:
+        reasons.append(f"Optimalan broj rotacionih veza({descriptors['NumRotatableBonds']}), fleksibilnost je zadovoljena")
+        score+=1
+    else:
+        reasons.append(f"Broj rotacionih veza je mali({descriptors['NumRotatableBonds']}), molekul je rigidan")
+    
     percentage=(score/max_score)*100
-    if percentage>=75:
+    if percentage>=80:
         summary="Odlican kandidat za inhibitor"
-        color="success"
-    elif percentage>=50:
-        summary="Dobar kandidat za inhibitor (postoje manji nedostaci)"
+        color="success" 
+    elif percentage>=45:
+        summary="Srednji kandidat za inhibitor (postoje manji nedostaci)"
         color='warning'
     else:
         summary="Los kandidat za inhibitor"
@@ -211,19 +245,19 @@ def load_models_data():
     return models,data,feat_names
 
 @st.cache_data
-def load_top5_from_db():
-    df=pd.read_csv("../data/features/human_trypsin_features.csv",sep=';')
-    top5=df.nlargest(5,'pKi')[['Smiles','pKi']].reset_index(drop=True)
+def load_top1000_from_db():
+    df=pd.read_csv("../data/features/human_trypsin_features.csv",sep=',')
+    top5=df.nlargest(1000,'pKi')[['Smiles','pKi']].reset_index(drop=True)
     return top5
 
 def predict_pKi(feature_series,model,data,model_name):
     try:
         feat_array=feature_series.values.reshape(1,-1)
         X_var=feat_array[:,data['variance_mask']]
-        X_corr=feat_array[:,data['correlation_mask']]
-        X_scaled=data['scaler'].transform(X_corr)
-        X_selected=data['selector'].transform(X_scaled)
-        X_pca=data['pca'].transform(X_selected)
+        X_corr=X_var[:,data['correlation_mask']]
+        X_selected=data['selector'].transform(X_corr)
+        X_scaled=data['scaler'].transform(X_selected)
+        X_pca=data['pca'].transform(X_scaled)
         if model_name=='Random Forest':
             tree_preds=np.array([tree.predict(X_pca)[0] for tree in model.estimators_])
             pKi_mean=tree_preds.mean()
@@ -328,7 +362,9 @@ Top 5 najslicnijih inhibitora iz baze podataka:
 def main():
     st.title("Prediktor afiniteta vezivanja inhibitora za humani tripsin")
     models,data,feature_names=load_models_data()
-    top5_db=load_top5_from_db()
+    top100_db=load_top1000_from_db()
+    if 'smiles_input' not in st.session_state:
+        st.session_state.smiles_input="" 
     if 'history' not in st.session_state:
         st.session_state.history=[]
     with st.sidebar:
@@ -348,8 +384,8 @@ def main():
         if info.get('best'):
             st.success("Odabrali ste najbolji model")
         st.metric("RMSE",info.get('rmse','N/A'))
-        st.metric("R^2","N/A")
-        st.metric("R^2_adj","N/A")
+        st.metric("R^2",info.get('r2','N/A'))
+        st.metric("R^2_adj",info.get('r2_adj','N/A'))
         st.markdown("---")
         st.markdown("Istorija pretrage")
         if st.session_state.history:
@@ -364,21 +400,18 @@ def main():
         st.header("Unos molekula")
         col1,col2=st.columns([3,1])
         with col1:
-            smiles_input=st.text_input("Unesite SMILES strukturu: ", placeholder="npr.CC(C)Cc1ccc(cc1)C(C)C(=O)O",help="SMILES notacija molekula")
-        with col2:
-            if st.button("Obriši"):
-                smiles_input=""
-                st.rerun()
-        if smiles_input:
-            mol=Chem.MolFromSmiles(smiles_input)
+            smiles_input=st.text_input("Unesite SMILES strukturu: ", value=st.session_state.smiles_input,key="smiles_widget",placeholder="npr.CC(C)Cc1ccc(cc1)C(C)C(=O)O",help="SMILES notacija molekula")
+            st.session_state.smiles_input=smiles_input
+        if st.session_state.smiles_input:
+            mol=Chem.MolFromSmiles(st.session_state.smiles_input)
             if mol is None:
                 st.error("Uneli ste neodgovarajući SMILES format. Pokušajte ponovo.")
             col1,col2=st.columns(2)
             with col1:
                 st.subheader("Struktura molekula")
                 img_bytes=mol_to_image_bytes(mol)
-                st.image(img_bytes,use_column_width=True)
-                if st.button("Predvidi pKi",type="primary",use_container_width=True):
+                st.image(img_bytes,width='stretch')
+                if st.button("Predvidi pKi",type="primary",width='stretch'):
                     with st.spinner("Predikcija je u toku..."):
                         features=generate_single_mol_feats(smiles_input)
                         if features is None:
@@ -386,7 +419,7 @@ def main():
                         else:
                             pKi_mean,pKi_std,X_pca=predict_pKi(features,models[model_name],data,model_name)
                             if pKi_mean is not None:
-                                st.session_state.history.append({'smiles':smiles_input,'pKi':pKi_mean,'std':pKi_std})
+                                st.session_state.history.append({'smiles':smiles_input,'pKi':pKi_mean,'std':pKi_std,'model':model_name})
                                 shap_feat=None
                                 if model_name=='Random Forest' and feature_names:
                                     with st.spinner("SHAP izračunavanje u toku..."):
@@ -395,7 +428,7 @@ def main():
                                 st.subheader("Rezultati predikcije")
                                 col_a,col_b,col_c=st.columns(3)
                                 col_a.metric("Predvidjeni pKi ",f"{pKi_mean:.2f}")
-                                col_b.metric("Interval poverenja: ",f"±{pKi_mean:.2f}")
+                                col_b.metric("Interval poverenja: ",f"±{pKi_std:.2f}")
                                 ki_nm=10**(-pKi_mean)*1e9
                                 col_c.metric("Ki",f"{ki_nm:.1f} nM")
                                 if shap_feat:
@@ -403,36 +436,36 @@ def main():
                                     st.subheader("SHAP analiza")
                                     st.info("Top 3 najuticajnije karakteristike")
                                     for i,feat in enumerate(shap_feat,1):
-                                        with st.expander(f"{i}.{feat['name']} ({feat['tip']})"):
+                                        with st.expander(f"{i}.{feat['name']} ({feat['type']})"):
                                             st.write(f"Uticaj: {feat['direction']} predviđeni pKi")
                                             st.write(f"SHAP vrednost: {feat['shap']:.4f}")
                                             st.progress(min(feat['shap']/0.2,1.0))
                                 st.markdown("---")
                                 st.subheader("Distribucija pKi")
                                 fig,ax=plt.subplots(figsize=(8,4))
-                                ax.hist(top5_db['pKi'],bins=20,alpha=0.6,color='#B8A7D6',edgecolor='black',label='Top 100 inhibitora iz baze')
+                                ax.hist(top100_db['pKi'],bins=20,alpha=0.6,color='#B8A7D6',edgecolor='black',label='Top 1000 inhibitora iz baze')
                                 ax.axvline(pKi_mean,color="#690978",linewidth=3,linestyle='--',label=f'Korisnikov molekul ({pKi_mean:.2f})')
                                 ax.set_xlabel('pKi')
-                                ax.set_ylabel('Frekvencija')
+                                ax.set_ylabel('Broj molekula')
                                 ax.legend()
                                 ax.grid(alpha=0.3)
                                 st.pyplot(fig)
                                 st.subheader("Strukturna sličnost(Top 5)")
                                 tanimoto_scores=[]
-                                for _,row in top5_db.iterrows():
+                                for _,row in top100_db.iterrows():
                                     mol_db=Chem.MolFromSmiles(row['Smiles'])
                                     tanimoto=calculate_tanimoto(mol,mol_db)
                                     tanimoto_scores.append((row['Smiles'],row['pKi'],tanimoto))
                                 tanimoto_scores.sort(key=lambda x: x[2],reverse=True)
-                                df_tanimoto=pd.DataFrame(tanimoto_scores,columns=['SMILES','pKi','Tanimoto'])
-                                st.dataframe(df_tanimoto,use_container_width=True)
+                                df_tanimoto=pd.DataFrame(tanimoto_scores[:5],columns=['SMILES','pKi','Tanimoto'])
+                                st.dataframe(df_tanimoto,width='stretch')
                                 st.markdown("---")
                                 col_exp1,col_exp2=st.columns(2)
                                 with col_exp1:
                                     mol_desc=calculate_descriptors(mol)
                                     summary,reasons,perc,color_cat=analyze_inhibitor_quality(mol_desc)
                                     txt_report=generate_txt_report(smiles_input,mol_desc,pKi_mean,pKi_std,summary,reasons,tanimoto_scores)
-                                    st.download_button("Preuzmi izveštaj(TXT)",txt_report,file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",mime="text/plain",use_container_width=True)
+                                    st.download_button("Preuzmi izveštaj(TXT)",txt_report,file_name=f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",mime="text/plain",width='stretch')
             with col2:
                 st.subheader("Molekulske karakteristike")
                 descriptors=calculate_descriptors(mol)
@@ -446,6 +479,7 @@ def main():
                 st.metric("Broj aromatičnih prstenova",descriptors['NumAromaticRings'])
                 summary,reasons,percentage,color_type=analyze_inhibitor_quality(descriptors)
                 st.markdown("---") 
+                st.write(f"{percentage:.1f}% zadovoljava Lipinski pravila")
                 st.progress(percentage/100)
                 if color_type=="success":
                     st.success(summary)
@@ -476,6 +510,7 @@ def main():
                         st.warning(summary_a)
                     else:
                         st.error(summary_a)
+                    st.write(f"{perc_a:.1f}% zadovoljava Lipinski pravila")
                     st.progress(perc_a/100)
                     for reason in reasons_a:
                         st.write(reason)
